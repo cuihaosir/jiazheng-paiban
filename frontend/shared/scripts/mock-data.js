@@ -119,6 +119,7 @@ const MockData = {
       source: '微信',
       level: 2,
       tags: ['定期保洁', '有宠物'],
+      balance: 1200,
       lastServiceDate: '2026-08-10',
       totalOrders: 15,
       totalAmount: 2850,
@@ -145,6 +146,7 @@ const MockData = {
       source: '转介绍',
       level: 3,
       tags: ['SVIP', '定期保洁', '月嫂需求'],
+      balance: 5800,
       lastServiceDate: '2026-08-12',
       totalOrders: 32,
       totalAmount: 18600,
@@ -241,6 +243,46 @@ const MockData = {
     }
     return orders;
   },
+
+  /**
+   * 渠道平台待导入订单（示意数据）
+   * 说明：美团/58 等平台没有对外开放的订单 API，真实对接需商务合作授权。
+   * 这里用模拟数据演示「平台订单 → 确认导入 → 派单」的流程。
+   */
+  channelOrders: [
+    {
+      id: 'ch001', channel: '美团', channelOrderNo: 'MT20260814093012',
+      customerName: '周女士', customerPhone: '13600008888',
+      address: '朝阳区亚运村安慧里三区 5 号楼 802',
+      serviceType: '日常保洁', date: '', time: '09:00', duration: 3,
+      amount: 168, platformFee: 16.8, remark: '有猫，清洁剂要温和',
+      status: 'pending'
+    },
+    {
+      id: 'ch002', channel: '美团', channelOrderNo: 'MT20260814101533',
+      customerName: '吴先生', customerPhone: '13600009999',
+      address: '海淀区五道口华清嘉园 12 号楼 1503',
+      serviceType: '深度保洁', date: '', time: '14:00', duration: 4,
+      amount: 398, platformFee: 39.8, remark: '搬家前打扫，厨房油污重',
+      status: 'pending'
+    },
+    {
+      id: 'ch003', channel: '58同城', channelOrderNo: '58-2026081400271',
+      customerName: '郑阿姨', customerPhone: '13600007777',
+      address: '西城区德胜门内大街 93 号院 3 单元',
+      serviceType: '擦玻璃', date: '', time: '10:00', duration: 2,
+      amount: 128, platformFee: 6.4, remark: '六楼，落地窗 4 扇',
+      status: 'pending'
+    },
+    {
+      id: 'ch004', channel: '58同城', channelOrderNo: '58-2026081400318',
+      customerName: '马女士', customerPhone: '13600006666',
+      address: '丰台区总部基地 18 区 3 号楼',
+      serviceType: '家电清洗', date: '', time: '15:30', duration: 2,
+      amount: 258, platformFee: 12.9, remark: '洗衣机+油烟机各一台',
+      status: 'pending'
+    }
+  ],
 
   /** 请假记录 */
   leaveList: [

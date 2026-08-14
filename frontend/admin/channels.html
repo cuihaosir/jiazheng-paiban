@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>渠道对接 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .ch-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-bottom: 18px; }
+  .ch-card {
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 16px 18px; box-shadow: var(--shadow-sm); position: relative;
+  }
+  .ch-top { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .ch-logo {
+    width: 38px; height: 38px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 19px; font-weight: 700; color: #fff; flex-shrink: 0;
+  }
+  .ch-mt { background: #ffc300; color: #33270c; }
+  .ch-58 { background: #12b7f5; }
+  .ch-wx { background: #07c160; }
+  .ch-name { font-size: 15px; font-weight: 600; }
+  .ch-state { font-size: 12px; margin-top: 1px; }
+  .ch-on { color: var(--success); }
+  .ch-off { color: var(--text-tertiary); }
+  .ch-row { display: flex; justify-content: space-between; font-size: 13px; padding: 5px 0; }
+  .ch-k { color: var(--text-tertiary); }
+  .ch-actions { margin-top: 12px; display: flex; gap: 8px; }
+
+  .switch { position: relative; width: 40px; height: 22px; cursor: pointer; flex-shrink: 0; }
+  .switch input { display: none; }
+  .switch-track { position: absolute; inset: 0; background: #cbd5e1; border-radius: 11px; transition: background .2s; }
+  .switch-dot {
+    position: absolute; top: 2.5px; left: 2.5px; width: 17px; height: 17px;
+    background: #fff; border-radius: 50%; transition: transform .2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  }
+  .switch input:checked + .switch-track { background: var(--success); }
+  .switch input:checked + .switch-track .switch-dot { transform: translateX(18px); }
+
+  .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+  .flow-step {
+    padding: 7px 13px; border-radius: 8px; background: #fff;
+    border: 1px solid var(--border); font-weight: 500;
+  }
+  .flow-arr { color: var(--text-tertiary); }
+  .flow-step.done { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; }
+  .flow-step.now { background: var(--primary-bg); border-color: #bfdbfe; color: #1e40af; }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">渠道对接</span>
+      <span class="topbar-sub">平台订单自动同步到系统，统一派单</span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" onclick="doSync()">🔄 同步平台订单</button>
+      <a class="btn btn-primary" href="order-create.html">+ 手动建单</a>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="alert alert-warn">
+      <span>⚠️</span>
+      <div>
+        <b>本页为流程示意，未真实对接平台。</b><br>
+        美团、58 同城均<b>未提供对外开放的订单查询 API</b>，真实对接需要：
+        ① 以商家/服务商身份与平台签署合作协议 → ② 通过平台审核获取 AppKey 与商家授权 →
+        ③ 由后端调用其服务商接口拉单，或接收平台 Webhook 推送。
+        这里用模拟数据完整演示「拉取平台订单 → 核对导入 → 派单」的操作流程与界面。
+      </div>
+    </div>
+
+    <div class="ch-cards" id="chCards"></div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><span class="card-title">对接后的订单流转</span></div>
+      <div class="card-body">
+        <div class="flow">
+          <span class="flow-step done">平台产生订单</span>
+          <span class="flow-arr">→</span>
+          <span class="flow-step done">系统拉取/接收推送</span>
+          <span class="flow-arr">→</span>
+          <span class="flow-step now">调度员核对导入</span>
+          <span class="flow-arr">→</span>
+          <span class="flow-step">智能派单给阿姨</span>
+          <span class="flow-arr">→</span>
+          <span class="flow-step">阿姨接单上门</span>
+          <span class="flow-arr">→</span>
+          <span class="flow-step">回传完成状态</span>
+        </div>
+        <div class="field-hint" style="margin-top:12px">
+          导入时会自动创建/匹配客户档案，平台订单号一并留存，方便与平台对账。
+        </div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="seg" id="tabSeg"></div>
+      <div class="toolbar-spacer"></div>
+      <span class="td-muted" id="cntLabel"></span>
+    </div>
+
+    <div class="card">
+      <div class="card-body tight">
+        <div class="table-wrap" id="tableBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalHost"></div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('channels')) {
+
+  const CFG_KEY = 'jz_channel_cfg';
+  let tab = 'pending';
+
+  const CHANNELS = [
+    { key: '美团', cls: 'ch-mt', logo: '美', fee: '10%', note: '家政到家类目' },
+    { key: '58同城', cls: 'ch-58', logo: '58', fee: '5%', note: '本地家政频道' },
+    { key: '微信小程序', cls: 'ch-wx', logo: '微', fee: '0%', note: '自有渠道，无抽成' }
+  ];
+
+  function cfg() {
+    try { return JSON.parse(localStorage.getItem(CFG_KEY) || '{}'); } catch (e) { return {}; }
+  }
+  function saveCfg(o) {
+    try { localStorage.setItem(CFG_KEY, JSON.stringify(o)); } catch (e) {}
+  }
+
+  window.toggleCh = function (key, el) {
+    const c = cfg();
+    c[key] = el.checked;
+    saveCfg(c);
+    Utils.toast(key + (el.checked ? ' 已开启同步（示意）' : ' 已关闭同步'));
+    renderCards();
+  };
+
+  function renderCards() {
+    const c = cfg();
+    const all = ChannelStorage.getAll();
+    document.getElementById('chCards').innerHTML = CHANNELS.map(ch => {
+      const on = c[ch.key] !== false;
+      const mine = all.filter(x => x.channel === ch.key);
+      const pending = mine.filter(x => x.status === 'pending').length;
+      const imported = mine.filter(x => x.status === 'imported').length;
+      return `
+        <div class="ch-card">
+          <div class="ch-top">
+            <div class="ch-logo ${ch.cls}">${ch.logo}</div>
+            <div style="flex:1">
+              <div class="ch-name">${ch.key}</div>
+              <div class="ch-state ${on ? 'ch-on' : 'ch-off'}">${on ? '● 已开启同步（示意）' : '○ 未开启'}</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleCh('${ch.key}', this)">
+              <span class="switch-track"><span class="switch-dot"></span></span>
+            </label>
+          </div>
+          <div class="ch-row"><span class="ch-k">平台抽成</span><span>${ch.fee}</span></div>
+          <div class="ch-row"><span class="ch-k">待导入</span><span style="font-weight:600;color:${pending ? 'var(--warning)' : 'inherit'}">${pending} 单</span></div>
+          <div class="ch-row"><span class="ch-k">已导入</span><span>${imported} 单</span></div>
+          <div class="ch-row"><span class="ch-k">类目</span><span class="td-muted">${ch.note}</span></div>
+        </div>`;
+    }).join('');
+  }
+
+  function renderSeg() {
+    const all = ChannelStorage.getAll();
+    const items = [
+      { k: 'pending', n: '待导入', c: all.filter(x => x.status === 'pending').length },
+      { k: 'imported', n: '已导入', c: all.filter(x => x.status === 'imported').length },
+      { k: 'ignored', n: '已忽略', c: all.filter(x => x.status === 'ignored').length }
+    ];
+    document.getElementById('tabSeg').innerHTML = items.map(i =>
+      `<button class="${i.k === tab ? 'on' : ''}" onclick="setTab('${i.k}')">${i.n} ${i.c}</button>`).join('');
+  }
+
+  window.setTab = function (k) { tab = k; renderSeg(); render(); };
+
+  window.doSync = function () {
+    ChannelStorage.sync();
+    Utils.toast('已同步，拉取到 ' + ChannelStorage.getPending().length + ' 条待处理订单（模拟）');
+    renderCards(); renderSeg(); render();
+  };
+
+  window.render = function () {
+    const list = ChannelStorage.getAll().filter(x => x.status === tab);
+    document.getElementById('cntLabel').textContent = list.length + ' 条';
+
+    document.getElementById('tableBox').innerHTML = list.length === 0
+      ? `<div class="table-empty"><div class="table-empty-icon">📥</div>
+         ${tab === 'pending' ? '没有待导入的平台订单，点右上角「同步平台订单」试试' : '暂无记录'}</div>`
+      : `<table class="data">
+          <thead><tr>
+            <th style="width:92px">渠道</th>
+            <th style="width:152px">平台订单号</th>
+            <th style="width:126px">服务时间</th>
+            <th>客户</th>
+            <th>服务</th>
+            <th>地址</th>
+            <th style="width:96px">平台金额</th>
+            <th style="width:82px">抽成</th>
+            <th style="width:150px"></th>
+          </tr></thead>
+          <tbody>${list.map(o => `
+            <tr>
+              <td><span class="tag tag-soft">${o.channel}</span></td>
+              <td class="td-muted" style="font-family:ui-monospace,Consolas,monospace;font-size:12px">${o.channelOrderNo}</td>
+              <td>${o.date || '<span class="td-muted">待定</span>'}
+                <div class="td-muted">${o.time} · ${o.duration}h</div></td>
+              <td>${o.customerName}
+                <div><a class="tel" href="tel:${o.customerPhone}" style="font-size:12px;color:var(--text-secondary);text-decoration:none">📞 ${o.customerPhone}</a></div></td>
+              <td>${o.serviceType}</td>
+              <td class="td-muted">${o.address.length > 18 ? o.address.slice(0, 18) + '…' : o.address}</td>
+              <td class="td-money">${Utils.formatMoney(o.amount)}</td>
+              <td class="td-muted">−${Utils.formatMoney(o.platformFee)}</td>
+              <td class="td-actions">
+                ${o.status === 'pending'
+                  ? `<button class="btn btn-primary btn-sm" onclick="openImport('${o.id}')">导入派单</button>
+                     <button class="btn btn-ghost btn-sm" onclick="doIgnore('${o.id}')">忽略</button>`
+                  : o.status === 'imported'
+                    ? `<button class="btn btn-ghost btn-sm" onclick="location.href='order-detail.html?id=${o.systemOrderId}'">查看订单</button>`
+                    : `<span class="td-muted">${o.ignoreReason || '已忽略'}</span>`}
+              </td>
+            </tr>`).join('')}
+          </tbody></table>`;
+  };
+
+  window.doIgnore = function (id) {
+    const r = prompt('忽略原因（选填）：', '客户已取消');
+    if (r === null) return;
+    ChannelStorage.ignore(id, r);
+    Utils.toast('已忽略');
+    renderCards(); renderSeg(); render();
+  };
+
+  /** 导入弹窗：核对信息 + 选阿姨 + 冲突检测 */
+  window.openImport = function (id) {
+    const o = ChannelStorage.getById(id);
+    if (!o) return;
+
+    const exist = CustomerStorage.getByPhone(o.customerPhone);
+    document.getElementById('modalHost').innerHTML = `
+      <div class="mask" onclick="if(event.target===this)closeModal()">
+        <div class="modal wide">
+          <div class="modal-head">
+            <span class="modal-title">导入 ${o.channel} 订单并派单</span>
+            <button class="modal-x" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-info"><span>ℹ️</span><div>
+              平台订单号 <b>${o.channelOrderNo}</b>　平台金额 <b>${Utils.formatMoney(o.amount)}</b>
+              　抽成 ${Utils.formatMoney(o.platformFee)}　实收 <b>${Utils.formatMoney(o.amount - o.platformFee)}</b><br>
+              ${exist ? '已匹配到老客户档案：<b>' + exist.name + '</b>（' + exist.totalOrders + ' 单）' : '系统中无此客户，导入时将<b>自动创建客户档案</b>'}
+            </div></div>
+
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">客户姓名</label>
+                <input class="input" id="imName" value="${o.customerName}">
+              </div>
+              <div class="field">
+                <label class="field-label">联系电话</label>
+                <input class="input" id="imPhone" value="${o.customerPhone}">
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label">服务地址</label>
+              <input class="input" id="imAddr" value="${o.address}">
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">服务日期</label>
+                <input class="input" id="imDate" type="date" value="${o.date}" onchange="imRec()">
+              </div>
+              <div class="field">
+                <label class="field-label">开始时间</label>
+                <input class="input" id="imTime" type="time" value="${o.time}" onchange="imRec()">
+              </div>
+              <div class="field">
+                <label class="field-label">时长（小时）</label>
+                <input class="input" id="imDur" type="number" min="1" value="${o.duration}" onchange="imRec()">
+              </div>
+            </div>
+            ${o.remark ? `<div class="alert alert-warn"><span>📝</span><div>客户备注：${o.remark}</div></div>` : ''}
+
+            <div class="field">
+              <label class="field-label">指派阿姨 <span class="req">*</span></label>
+              <div id="imRecBox"></div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+            <button class="btn btn-primary" onclick="doImport('${o.id}')">确认导入并派单</button>
+          </div>
+        </div>
+      </div>`;
+    imRec();
+  };
+
+  let imStaffId = '';
+
+  function imRange() {
+    const d = document.getElementById('imDate').value;
+    const t = document.getElementById('imTime').value;
+    const h = Number(document.getElementById('imDur').value) || 2;
+    if (!d || !t) return null;
+    const s = new Date(d + 'T' + t + ':00');
+    return { start: s.toISOString(), end: new Date(s.getTime() + h * 3600000).toISOString(), dur: h };
+  }
+
+  window.imRec = function () {
+    const r = imRange();
+    const box = document.getElementById('imRecBox');
+    if (!r) { box.innerHTML = '<div class="field-hint">请先填写服务日期和时间</div>'; return; }
+
+    const addr = document.getElementById('imAddr').value;
+    const busy = OrderStorage.getAll()
+      .filter(x => x.status !== 0 && Utils.isTimeOverlap(r.start, r.end, x.startTime, x.endTime))
+      .map(x => x.staffId);
+
+    const pool = StaffStorage.getAll()
+      .filter(s => s.status === 1 && busy.indexOf(s.id) < 0)
+      .map(s => {
+        let sc = 55; const why = [];
+        if (s.rating >= 4.8) { sc += 10; why.push('高评分'); }
+        if (addr && s.serviceAreas.some(a => addr.indexOf(a) >= 0)) { sc += 15; why.push('区域匹配'); }
+        return { s: s, sc: Math.min(sc, 99), why: why };
+      })
+      .sort((a, b) => b.sc - a.sc);
+
+    if (!pool.length) {
+      box.innerHTML = '<div class="alert alert-err"><span>⚠️</span><div>该时段没有空闲阿姨，请调整时间</div></div>';
+      imStaffId = '';
+      return;
+    }
+
+    box.innerHTML = pool.map(p => `
+      <div class="rec ${p.s.id === imStaffId ? 'on' : ''}" data-id="${p.s.id}" onclick="imPick('${p.s.id}')">
+        <span class="rec-avatar">${p.s.avatar}</span>
+        <div class="rec-body">
+          <div class="rec-name">${p.s.name} <span class="td-muted">⭐ ${p.s.rating}</span></div>
+          <div class="rec-meta">${p.s.skills.slice(0, 3).join(' · ')} ｜ ${p.s.serviceAreas.join('、')}</div>
+          <div class="rec-meta" style="color:var(--success)">${p.why.join(' · ') || '时间空闲'}</div>
+        </div>
+        <span class="rec-score">${p.sc}%</span>
+      </div>`).join('');
+
+    if (!imStaffId || !pool.find(p => p.s.id === imStaffId)) imPick(pool[0].s.id);
+  };
+
+  window.imPick = function (sid) {
+    imStaffId = sid;
+    document.querySelectorAll('#imRecBox .rec').forEach(el =>
+      el.classList.toggle('on', el.dataset.id === sid));
+  };
+
+  window.doImport = function (chId) {
+    const ch = ChannelStorage.getById(chId);
+    const r = imRange();
+    const name = document.getElementById('imName').value.trim();
+    const phone = document.getElementById('imPhone').value.trim();
+    const addr = document.getElementById('imAddr').value.trim();
+
+    if (!name) return Utils.toast('请填写客户姓名');
+    if (!Utils.validatePhone(phone)) return Utils.toast('手机号格式不正确');
+    if (!addr) return Utils.toast('请填写服务地址');
+    if (!r) return Utils.toast('请填写服务时间');
+    if (!imStaffId) return Utils.toast('请指派阿姨');
+    if (OrderStorage.checkConflict(imStaffId, r.start, r.end).length) {
+      return Utils.toast('该阿姨此时段有冲突，请换人或改时间');
+    }
+
+    // 匹配或创建客户
+    let cust = CustomerStorage.getByPhone(phone);
+    if (!cust) {
+      cust = CustomerStorage.add({
+        name: name, phone: phone, address: addr,
+        source: ch.channel, level: 1, tags: [],
+        lastServiceDate: '', totalOrders: 0, totalAmount: 0,
+        remark: ch.remark || ''
+      });
+    }
+
+    const staff = StaffStorage.getById(imStaffId);
+    const order = OrderStorage.add({
+      customerId: cust.id, customerName: name, customerPhone: phone,
+      staffId: imStaffId, staffName: staff.name,
+      serviceType: ch.serviceType,
+      startTime: r.start, endTime: r.end, duration: r.dur,
+      address: addr, amount: ch.amount, status: 1,
+      source: ch.channel, remark: ch.remark || '',
+      cancelReason: '', rating: 0,
+      channel: ch.channel, channelOrderNo: ch.channelOrderNo,
+      platformFee: ch.platformFee
+    });
+
+    CustomerStorage.update(cust.id, {
+      lastServiceDate: Utils.formatDate(r.start),
+      totalOrders: (cust.totalOrders || 0) + 1,
+      totalAmount: (cust.totalAmount || 0) + ch.amount
+    });
+
+    ChannelStorage.markImported(chId, order.id, order.orderNo);
+    NotifyStorage.push('order_dispatch', staff.name, staff.phone,
+      `【家政管家】${ch.channel}新单：${Utils.formatDate(r.start, 'MM月DD日 HH:mm')} ${addr}（${ch.serviceType}），请确认接单。`,
+      order.id);
+
+    closeModal();
+    Utils.toast('已导入并派单给 ' + staff.name);
+    renderCards(); renderSeg(); render();
+  };
+
+  window.closeModal = function () { document.getElementById('modalHost').innerHTML = ''; };
+
+  renderCards();
+  renderSeg();
+  render();
+}
+</script>
+</body>
+</html>

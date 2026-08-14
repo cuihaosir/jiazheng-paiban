@@ -9,6 +9,16 @@
   .pager { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-top: 1px solid var(--divider); }
   .pager-info { font-size: 13px; color: var(--text-tertiary); }
   .pager-btns { display: flex; gap: 7px; align-items: center; }
+
+  .tel {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12.5px; color: var(--text-secondary);
+    font-family: ui-monospace, Consolas, monospace;
+    padding: 2px 7px; border-radius: 6px; border: 1px solid transparent;
+    text-decoration: none; white-space: nowrap;
+  }
+  .tel:hover { border-color: var(--success); color: var(--success); background: #f0fdf4; }
+  .rate { color: #f59e0b; font-size: 12px; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -73,6 +83,10 @@ if (AdminLayout.init('orders')) {
   document.getElementById('staffSel').innerHTML += StaffStorage.getAll()
     .map(s => `<option value="${s.id}">${s.name}</option>`).join('');
 
+  // 阿姨档案索引，用于算「阿姨应得」和拨号
+  const staffMap = {};
+  StaffStorage.getAll().forEach(s => { staffMap[s.id] = s; });
+
   function renderSeg() {
     const all = OrderStorage.getAll();
     document.getElementById('statusSeg').innerHTML = statuses.map(s => {
@@ -122,31 +136,44 @@ if (AdminLayout.init('orders')) {
       ? '<div class="table-empty"><div class="table-empty-icon">📭</div>没有符合条件的订单</div>'
       : `<table class="data">
           <thead><tr>
-            <th style="width:150px">订单号</th>
-            <th style="width:158px">服务时间</th>
+            <th style="width:132px">订单号</th>
+            <th style="width:150px">服务时间</th>
             <th>客户</th>
             <th>服务类型</th>
             <th>阿姨</th>
             <th>地址</th>
-            <th style="width:80px">来源</th>
-            <th style="width:90px">金额</th>
+            <th style="width:88px">订单金额</th>
+            <th style="width:88px">阿姨应得</th>
             <th style="width:82px">状态</th>
-            <th style="width:70px"></th>
+            <th style="width:112px"></th>
           </tr></thead>
-          <tbody>${slice.map(o => `
-            <tr class="clickable" onclick="location.href='order-detail.html?id=${o.id}'">
-              <td class="td-muted">${o.orderNo}</td>
-              <td>${Utils.formatDate(o.startTime, 'MM-DD')} ${Utils.getWeekDay(o.startTime)}
+          <tbody>${slice.map(o => {
+            const st = staffMap[o.staffId];
+            const mp = SalaryStorage.orderPay(st, o);
+            return `
+            <tr>
+              <td class="td-muted clickable" onclick="location.href='order-detail.html?id=${o.id}'">${o.orderNo}
+                ${o.channelOrderNo ? '<div class="td-muted" style="font-size:11px">' + o.channel + '</div>' : ''}</td>
+              <td class="clickable" onclick="location.href='order-detail.html?id=${o.id}'">
+                  ${Utils.formatDate(o.startTime, 'MM-DD')} ${Utils.getWeekDay(o.startTime)}
                   <div class="td-muted">${Utils.formatDate(o.startTime, 'HH:mm')}–${Utils.formatDate(o.endTime, 'HH:mm')}</div></td>
-              <td>${o.customerName}<div class="td-muted">${o.customerPhone}</div></td>
-              <td>${o.serviceType}<div class="td-muted">${o.duration} 小时</div></td>
-              <td>${o.staffName}</td>
-              <td class="td-muted">${o.address.length > 16 ? o.address.slice(0, 16) + '…' : o.address}</td>
-              <td class="td-muted">${o.source || '-'}</td>
+              <td>${o.customerName}
+                  <div><a class="tel" href="tel:${o.customerPhone}" title="拨打客户">📞 ${o.customerPhone}</a></div></td>
+              <td class="clickable" onclick="location.href='order-detail.html?id=${o.id}'">${o.serviceType}
+                  <div class="td-muted">${o.duration} 小时</div></td>
+              <td>${o.staffName}
+                  ${st ? '<div><a class="tel" href="tel:' + st.phone + '" title="拨打阿姨">📞 ' + st.phone + '</a></div>' : ''}</td>
+              <td class="td-muted clickable" onclick="location.href='order-detail.html?id=${o.id}'">
+                  ${o.address.length > 14 ? o.address.slice(0, 14) + '…' : o.address}</td>
               <td class="td-money">${Utils.formatMoney(o.amount)}</td>
-              <td><span class="tag tag-${Utils.getOrderStatusClass(o.status)}">${Utils.getOrderStatusName(o.status)}</span></td>
-              <td class="td-actions"><span class="btn btn-ghost btn-sm">详情</span></td>
-            </tr>`).join('')}
+              <td style="font-weight:600;color:var(--success)">${mp.perOrderBased ? Utils.formatMoney(mp.pay) : '<span class="td-muted">包月</span>'}</td>
+              <td><span class="tag tag-${Utils.getOrderStatusClass(o.status)}">${Utils.getOrderStatusName(o.status)}</span>
+                  ${o.rating > 0 ? '<div class="rate">' + '⭐'.repeat(o.rating) + '</div>' : ''}</td>
+              <td class="td-actions">
+                <button class="btn btn-ghost btn-sm" onclick="location.href='order-detail.html?id=${o.id}'">详情</button>
+              </td>
+            </tr>`;
+          }).join('')}
           </tbody></table>`;
 
     document.getElementById('pager').innerHTML = `
@@ -162,13 +189,17 @@ if (AdminLayout.init('orders')) {
   window.exportCsv = function () {
     const list = getFiltered();
     if (!list.length) { Utils.toast('没有可导出的数据'); return; }
-    let csv = '订单号,服务日期,开始,结束,客户,电话,服务类型,时长,阿姨,地址,金额,来源,状态\n';
+    let csv = '订单号,服务日期,开始,结束,客户,客户电话,服务类型,时长,阿姨,阿姨电话,地址,订单金额,阿姨应得,公司毛利,来源,状态,评分\n';
     list.forEach(o => {
+      const st = staffMap[o.staffId];
+      const mp = SalaryStorage.orderPay(st, o);
       csv += [
         o.orderNo, Utils.formatDate(o.startTime, 'YYYY-MM-DD'),
         Utils.formatDate(o.startTime, 'HH:mm'), Utils.formatDate(o.endTime, 'HH:mm'),
         o.customerName, o.customerPhone, o.serviceType, o.duration, o.staffName,
-        '"' + o.address + '"', o.amount, o.source || '', Utils.getOrderStatusName(o.status)
+        st ? st.phone : '', '"' + o.address + '"',
+        o.amount, mp.perOrderBased ? mp.pay : '', mp.perOrderBased ? Math.round((o.amount - mp.pay) * 100) / 100 : '',
+        o.source || '', Utils.getOrderStatusName(o.status), o.rating || ''
       ].join(',') + '\n';
     });
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });

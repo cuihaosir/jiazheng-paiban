@@ -20,6 +20,16 @@
   .top-money { font-size: 15px; opacity: .88; margin-top: 8px; }
   .top-money b { font-size: 24px; font-weight: 700; }
 
+  .gps-box {
+    display: flex; gap: 11px; padding: 13px 15px;
+    background: #f0f9ff; border: 1px solid #bae6fd;
+    border-radius: var(--radius); font-size: 14px; color: #075985;
+    line-height: 1.6; margin-top: 12px;
+  }
+  .gps-ok { background: var(--brand-bg); border-color: #a7f3d0; color: #047857; }
+  .gps-warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+  .gps-coord { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+
   .steps { display: flex; padding: 16px; }
   .step { flex: 1; text-align: center; position: relative; }
   .step::before {
@@ -92,6 +102,26 @@ if (App.init()) {
     const cust = CustomerStorage.getById(o.customerId);
     const stepIdx = o.status === 0 ? -1 : o.status === 1 ? 0 : o.status === 2 ? 1 : o.status === 3 ? 2 : 3;
     const STEPS = ['待接单', '待上门', '服务中', '已完成'];
+    const mp = App.myPay(o);
+
+    // GPS 打卡信息
+    let gpsHtml = '';
+    if (o.arriveAt) {
+      if (o.arriveLat && o.arriveLng) {
+        gpsHtml = `<div class="gps-box gps-ok">
+          <span>📍</span>
+          <div><b>已打卡 ${Utils.formatDate(o.arriveAt, 'HH:mm')}</b><br>
+          位置已记录 <span class="gps-coord">${Number(o.arriveLat).toFixed(5)}, ${Number(o.arriveLng).toFixed(5)}</span>
+          ${o.arriveAcc ? '（精度约 ' + Math.round(o.arriveAcc) + ' 米）' : ''}</div>
+        </div>`;
+      } else {
+        gpsHtml = `<div class="gps-box gps-warn">
+          <span>📍</span>
+          <div><b>已打卡 ${Utils.formatDate(o.arriveAt, 'HH:mm')}</b><br>
+          未能获取定位${o.arriveGpsErr ? '：' + o.arriveGpsErr : ''}，已按无位置记录</div>
+        </div>`;
+      }
+    }
 
     // 服务中计时
     let timerHtml = '';
@@ -110,7 +140,7 @@ if (App.init()) {
       actions = `<button class="btn btn-grad" onclick="act(2)">✅ 确认接单</button>
                  <button class="btn btn-line" onclick="App.call('${o.customerPhone}')">📞 先联系客户</button>`;
     } else if (o.status === 2) {
-      actions = `<button class="btn btn-brand" onclick="act(3)">📍 我到了，开始服务</button>
+      actions = `<button class="btn btn-brand" id="arriveBtn" onclick="arrive()">📍 我到了，开始服务</button>
                  <button class="btn btn-line" onclick="App.call('${o.customerPhone}')">📞 联系客户</button>`;
     } else if (o.status === 3) {
       actions = `<button class="btn btn-grad" onclick="finish()">🎉 服务完成</button>
@@ -124,7 +154,7 @@ if (App.init()) {
     // 提示文案
     let tip = '';
     if (o.status === 1) tip = '调度员给您派了这一单，确认后才算接下。如时间有冲突请及时联系公司。';
-    else if (o.status === 2) tip = '请按约定时间上门，到达后点「我到了」开始计时。';
+    else if (o.status === 2) tip = '请按约定时间上门。点「我到了」会记录打卡时间和位置，作为服务凭证，也是计时起点。';
     else if (o.status === 3) tip = '服务结束后记得点「服务完成」，这样工资才会计入本月。';
 
     document.getElementById('app').innerHTML = `
@@ -137,7 +167,9 @@ if (App.init()) {
         <div class="top-type">${o.serviceType}</div>
         <div class="top-time">${Utils.formatDate(o.startTime, 'MM月DD日')} ${Utils.getWeekDay(o.startTime)}
           ${Utils.formatDate(o.startTime, 'HH:mm')}–${Utils.formatDate(o.endTime, 'HH:mm')}</div>
-        <div class="top-money">这一单收入 <b>${Utils.formatMoney(o.amount)}</b></div>
+        <div class="top-money">${mp.perOrderBased
+          ? '我这一单能拿 <b>' + Utils.formatMoney(mp.pay) + '</b>'
+          : '包月固定工资，不按单计酬'}</div>
       </div>
 
       <div class="float">
@@ -154,6 +186,24 @@ if (App.init()) {
         <b>这单已取消</b><br>${o.cancelReason || '未填写原因'}</div></div>` : ''}
 
       ${timerHtml}
+
+      <div class="card">
+        <div class="card-head"><span class="card-title">这一单我拿多少</span></div>
+        <div class="card-body pt">
+          <div class="pay-split">
+            <div class="pay-split-cell mine">
+              <div class="pay-split-k">我的收入</div>
+              <div class="pay-split-v">${mp.perOrderBased ? Utils.formatMoney(mp.pay) : '—'}</div>
+              <div class="pay-split-note">${mp.note}</div>
+            </div>
+            <div class="pay-split-cell other">
+              <div class="pay-split-k">客户付款</div>
+              <div class="pay-split-v">${Utils.formatMoney(o.amount)}</div>
+              <div class="pay-split-note">这是客户付给公司的钱，不是您的收入</div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div class="card">
         <div class="card-head"><span class="card-title">客户与地址</span></div>
@@ -187,6 +237,7 @@ if (App.init()) {
             <span class="info-k">客户备注</span>
             <span class="info-v" style="font-weight:400">${cust.remark}</span>
           </div>` : ''}
+          ${gpsHtml}
         </div>
       </div>
 
@@ -203,14 +254,85 @@ if (App.init()) {
 
   window.act = function (status) {
     OrderStorage.update(id, { status });
-    Utils.toast(status === 2 ? '已确认接单！' : '已开始服务，正在计时');
+    Utils.toast('已确认接单！');
     render();
+
+    // 通知调度员（示意）
+    const o = OrderStorage.getById(id);
+    NotifyStorage.push('order_confirmed', '调度员', '',
+      `${o.staffName} 已确认接单：${Utils.formatDate(o.startTime, 'MM-DD HH:mm')} ${o.customerName}（${o.serviceType}）`, id);
+  };
+
+  /** 上门打卡：先尝试取 GPS，无论成功失败都不阻塞打卡 */
+  window.arrive = function () {
+    const btn = document.getElementById('arriveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '正在定位…'; }
+
+    function finish(extra) {
+      OrderStorage.update(id, Object.assign({
+        status: 3,
+        arriveAt: new Date().toISOString()
+      }, extra));
+      Utils.toast('已打卡，开始计时');
+      render();
+    }
+
+    if (!navigator.geolocation) {
+      finish({ arriveGpsErr: '设备不支持定位' });
+      return;
+    }
+
+    // HTTPS 或 localhost 才允许定位
+    const secure = location.protocol === 'https:' ||
+      location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    if (!secure) {
+      finish({ arriveGpsErr: '非 HTTPS 环境浏览器禁止定位' });
+      return;
+    }
+
+    let done = false;
+    const timer = setTimeout(function () {
+      if (!done) { done = true; finish({ arriveGpsErr: '定位超时' }); }
+    }, 8000);
+
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        if (done) return;
+        done = true; clearTimeout(timer);
+        finish({
+          arriveLat: pos.coords.latitude,
+          arriveLng: pos.coords.longitude,
+          arriveAcc: pos.coords.accuracy
+        });
+      },
+      function (err) {
+        if (done) return;
+        done = true; clearTimeout(timer);
+        const msgs = { 1: '您拒绝了定位授权', 2: '无法获取位置', 3: '定位超时' };
+        finish({ arriveGpsErr: msgs[err.code] || '定位失败' });
+      },
+      { enableHighAccuracy: true, timeout: 7000, maximumAge: 30000 }
+    );
   };
 
   window.finish = function () {
     if (!confirm('确认这一单已经做完了吗？')) return;
-    OrderStorage.update(id, { status: 4 });
-    Utils.toast('🎉 完成了，辛苦啦！工资已计入本月');
+    OrderStorage.update(id, {
+      status: 4,
+      finishAt: new Date().toISOString(),
+      reviewInvitedAt: new Date().toISOString()
+    });
+
+    // 自动向客户发送评价邀请（示意：真实发送需后端对接短信服务商）
+    const o = OrderStorage.getById(id);
+    const link = location.origin + location.pathname.replace(/app\/order-detail\.html$/, 'review.html') + '?order=' + id;
+    NotifyStorage.push('review_invite', o.customerName, o.customerPhone,
+      `【家政管家】您的${o.serviceType}服务已完成，感谢信任！请为${o.staffName}的服务打个分：${link}`, id);
+
+    const mp = App.myPay(o);
+    Utils.toast(mp.perOrderBased
+      ? '🎉 辛苦啦！本单收入 ' + Utils.formatMoney(mp.pay) + ' 已计入本月'
+      : '🎉 辛苦啦！服务已完成');
     render();
   };
 

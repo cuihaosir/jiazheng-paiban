@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#059669">
+<title>服务评价</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    background: #f4f6f8; color: #0f172a; font-size: 16px; line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; min-height: 100vh; }
+  .hero {
+    background: linear-gradient(140deg, #059669 0%, #0891b2 100%);
+    color: #fff; padding: 30px 20px 52px; text-align: center;
+  }
+  .hero-ico { font-size: 44px; }
+  .hero-t { font-size: 22px; font-weight: 700; margin-top: 6px; }
+  .hero-s { font-size: 14px; opacity: .88; margin-top: 4px; }
+
+  .card {
+    background: #fff; border-radius: 16px; margin: -34px 16px 14px;
+    padding: 18px; box-shadow: 0 4px 14px rgba(15,23,42,.09);
+    position: relative; z-index: 10;
+  }
+  .card2 { background: #fff; border-radius: 16px; margin: 0 16px 14px; padding: 18px; box-shadow: 0 1px 4px rgba(15,23,42,.06); }
+  .row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: 15px; }
+  .row:last-child { border-bottom: none; }
+  .k { color: #94a3b8; }
+  .v { font-weight: 500; text-align: right; max-width: 62%; }
+
+  .q { font-size: 17px; font-weight: 600; text-align: center; margin-bottom: 14px; }
+  .stars { display: flex; justify-content: center; gap: 8px; margin-bottom: 8px; }
+  .star {
+    font-size: 40px; cursor: pointer; filter: grayscale(1) opacity(.35);
+    transition: transform .12s, filter .12s; user-select: none;
+  }
+  .star.on { filter: none; transform: scale(1.08); }
+  .star-label { text-align: center; font-size: 15px; color: #059669; font-weight: 600; height: 24px; }
+
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .tag {
+    padding: 8px 14px; border: 1.5px solid #e4e9f0; border-radius: 20px;
+    font-size: 14px; color: #475569; cursor: pointer;
+  }
+  .tag.on { background: #ecfdf5; border-color: #059669; color: #047857; font-weight: 500; }
+
+  .ta {
+    width: 100%; margin-top: 10px; padding: 13px; min-height: 92px;
+    border: 1.5px solid #e4e9f0; border-radius: 12px; font-size: 15px;
+    font-family: inherit; resize: vertical;
+  }
+  .ta:focus { outline: none; border-color: #059669; }
+
+  .btn {
+    width: calc(100% - 32px); margin: 4px 16px 20px; padding: 16px;
+    background: linear-gradient(135deg, #059669 0%, #0891b2 100%);
+    color: #fff; border: none; border-radius: 12px;
+    font-size: 18px; font-weight: 600; cursor: pointer;
+  }
+  .btn:active { transform: scale(.985); }
+  .btn:disabled { opacity: .45; }
+
+  .done { text-align: center; padding: 60px 24px; }
+  .done-ico { font-size: 60px; }
+  .done-t { font-size: 22px; font-weight: 700; margin: 12px 0 6px; }
+  .done-s { font-size: 15px; color: #475569; line-height: 1.8; }
+  .done-stars { font-size: 26px; margin-top: 14px; }
+
+  .demo {
+    margin: 0 16px 24px; padding: 12px 14px; border-radius: 12px;
+    background: #fffbeb; border: 1px solid #fde68a;
+    font-size: 13px; color: #92400e; line-height: 1.65;
+  }
+  .foot { text-align: center; font-size: 12px; color: #94a3b8; padding-bottom: 26px; }
+
+  .toast {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(15,23,42,.88); color: #fff;
+    padding: 15px 26px; border-radius: 12px;
+    font-size: 16px; z-index: 9999; max-width: 80%; text-align: center;
+    animation: tin .25s ease;
+  }
+  @keyframes tin {
+    from { opacity: 0; transform: translate(-50%,-50%) scale(.92) }
+    to { opacity: 1; transform: translate(-50%,-50%) scale(1) }
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap"></div>
+
+<script src="shared/scripts/utils.js"></script>
+<script src="shared/scripts/mock-data.js"></script>
+<script src="shared/scripts/storage.js"></script>
+<script>
+  const TAGS_GOOD = ['打扫干净', '态度好', '守时', '手脚麻利', '细心', '收纳整齐'];
+  const TAGS_BAD = ['迟到', '打扫不干净', '态度一般', '弄坏物品', '提前离开'];
+
+  const orderId = Utils.getParam('order');
+  let score = 0;
+  let picked = [];
+
+  function render() {
+    const o = orderId ? OrderStorage.getById(orderId) : null;
+
+    // 订单不存在（跨设备打开的典型情况）
+    if (!o) {
+      document.getElementById('wrap').innerHTML = `
+        <div class="hero">
+          <div class="hero-ico">🔍</div>
+          <div class="hero-t">找不到这个订单</div>
+          <div class="hero-s">链接可能已失效</div>
+        </div>
+        <div class="card">
+          <div style="font-size:15px;line-height:1.8;color:#475569">
+            可能的原因：<br>
+            · 评价链接不完整或已过期<br>
+            · 演示版数据保存在浏览器本地，换设备/浏览器打开会读不到<br><br>
+            如需评价，请联系家政公司客服。
+          </div>
+        </div>
+        <div class="demo">
+          <b>演示说明</b>：本页面用于展示「服务完成 → 客户收到短信 → 打开链接评价」的流程。
+          演示版数据存在各自浏览器的本地存储中，因此跨设备打开无法读取订单。
+          真实环境下订单存在服务端数据库，任何设备打开链接都能正常评价。
+        </div>
+        <div class="foot">家政排班管理系统 · 演示版</div>`;
+      return;
+    }
+
+    // 已评价过
+    if (o.status === 5 && o.rating) {
+      const tags = (o.reviewTags || []).map(t => `<span class="tag on">${t}</span>`).join('');
+      document.getElementById('wrap').innerHTML = `
+        <div class="hero">
+          <div class="hero-ico">💚</div>
+          <div class="hero-t">感谢您的评价</div>
+          <div class="hero-s">您的反馈我们已收到</div>
+        </div>
+        <div class="card">
+          <div class="done">
+            <div class="done-ico">🎉</div>
+            <div class="done-t">已完成评价</div>
+            <div class="done-s">您给 ${o.staffName} 的评分</div>
+            <div class="done-stars">${'⭐'.repeat(o.rating)}</div>
+            ${tags ? `<div class="tags" style="justify-content:center;margin-top:14px">${tags}</div>` : ''}
+            ${o.review ? `<div class="done-s" style="margin-top:14px;color:#0f172a">「${o.review}」</div>` : ''}
+          </div>
+        </div>
+        <div class="foot">家政排班管理系统 · 演示版</div>`;
+      return;
+    }
+
+    const tagPool = score > 0 && score <= 3 ? TAGS_BAD : TAGS_GOOD;
+    const LABELS = { 1: '很不满意', 2: '不太满意', 3: '一般', 4: '满意', 5: '非常满意' };
+
+    document.getElementById('wrap').innerHTML = `
+      <div class="hero">
+        <div class="hero-ico">✨</div>
+        <div class="hero-t">服务完成啦</div>
+        <div class="hero-s">${o.customerName}，请为本次服务打个分</div>
+      </div>
+
+      <div class="card">
+        <div class="row"><span class="k">服务项目</span><span class="v">${o.serviceType} · ${o.duration} 小时</span></div>
+        <div class="row"><span class="k">服务时间</span><span class="v">${Utils.formatDate(o.startTime, 'YYYY年MM月DD日 HH:mm')}</span></div>
+        <div class="row"><span class="k">服务人员</span><span class="v">${o.staffName}</span></div>
+        <div class="row"><span class="k">服务地址</span><span class="v">${o.address}</span></div>
+        <div class="row"><span class="k">订单金额</span><span class="v">${Utils.formatMoney(o.amount)}</span></div>
+      </div>
+
+      <div class="card2">
+        <div class="q">您对这次服务满意吗？</div>
+        <div class="stars">
+          ${[1,2,3,4,5].map(n =>
+            `<span class="star ${n <= score ? 'on' : ''}" onclick="pick(${n})">⭐</span>`).join('')}
+        </div>
+        <div class="star-label">${score ? LABELS[score] : ''}</div>
+
+        ${score ? `
+          <div style="font-size:15px;font-weight:600;margin-top:16px">
+            ${score >= 4 ? '哪里让您满意？' : '哪里需要改进？'}（可多选）
+          </div>
+          <div class="tags">
+            ${tagPool.map(t => `<span class="tag ${picked.includes(t) ? 'on' : ''}" onclick="toggle('${t}')">${t}</span>`).join('')}
+          </div>
+          <textarea class="ta" id="txt" placeholder="还有什么想说的？（选填）">${document.getElementById('txt') ? document.getElementById('txt').value : ''}</textarea>
+        ` : ''}
+      </div>
+
+      <button class="btn" onclick="submit()" ${score ? '' : 'disabled'}>
+        ${score ? '提交评价' : '请先选择星级'}
+      </button>
+
+      <div class="demo">
+        <b>演示说明</b>：真实环境中此链接由服务完成后自动发送的短信送达客户手机。
+        短信发送需后端对接短信服务商（如阿里云短信 / 腾讯云 SMS）并完成企业实名与模板报备，
+        演示版仅在后台记录「已发送」的通知内容。
+      </div>
+      <div class="foot">家政排班管理系统 · 演示版</div>`;
+  }
+
+  window.pick = function (n) {
+    const keep = document.getElementById('txt') ? document.getElementById('txt').value : '';
+    score = n;
+    picked = [];
+    render();
+    if (keep && document.getElementById('txt')) document.getElementById('txt').value = keep;
+  };
+
+  window.toggle = function (t) {
+    const keep = document.getElementById('txt') ? document.getElementById('txt').value : '';
+    picked = picked.includes(t) ? picked.filter(x => x !== t) : picked.concat(t);
+    render();
+    if (keep && document.getElementById('txt')) document.getElementById('txt').value = keep;
+  };
+
+  window.submit = function () {
+    if (!score) { Utils.toast('请先选择星级'); return; }
+    const txt = document.getElementById('txt') ? document.getElementById('txt').value.trim() : '';
+
+    OrderStorage.update(orderId, {
+      status: 5,
+      rating: score,
+      review: txt,
+      reviewTags: picked,
+      reviewedAt: new Date().toISOString()
+    });
+
+    // 同步更新阿姨的平均评分
+    const o = OrderStorage.getById(orderId);
+    const rated = OrderStorage.getByStaff(o.staffId).filter(x => x.rating > 0);
+    if (rated.length) {
+      const avg = Math.round(rated.reduce((a, x) => a + x.rating, 0) / rated.length * 10) / 10;
+      StaffStorage.update(o.staffId, { rating: avg });
+    }
+
+    NotifyStorage.push('review_done', '调度员', '',
+      `${o.customerName} 已评价 ${score} 星（${o.staffName} · ${o.serviceType}）${txt ? '：' + txt : ''}`, orderId);
+
+    Utils.toast('评价成功，感谢您的反馈！');
+    setTimeout(render, 700);
+  };
+
+  initAllData();
+  render();
+</script>
+</body>
+</html>

@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>客户管理 - 家政排班管理后台</title>
 <link rel="stylesheet" href="styles/admin.css">
+<style>
+  .tel {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12.5px; color: var(--text-secondary);
+    font-family: ui-monospace, Consolas, monospace;
+    padding: 3px 8px; border-radius: 6px;
+    border: 1px solid transparent; text-decoration: none; white-space: nowrap;
+  }
+  .tel:hover { border-color: var(--success); color: var(--success); background: #f0fdf4; }
+</style>
 </head>
 <body>
 <div class="main">
@@ -66,10 +76,14 @@ if (AdminLayout.init('customers')) {
     const totalAmount = all.reduce((a, c) => a + (c.totalAmount || 0), 0);
     const avgAmount = all.length ? Math.round(totalAmount / all.length) : 0;
 
+    const totalBal = BalanceStorage.totalBalance();
+    const balCount = all.filter(c => Number(c.balance || 0) > 0).length;
+
     document.getElementById('sumLabel').textContent = `共 ${all.length} 位客户`;
     document.getElementById('kpiRow').innerHTML = [
       { label: '客户总数', value: all.length, foot: `VIP 及以上 ${vip} 位`, icon: '👥', bg: '#eff6ff' },
       { label: '累计消费', value: Utils.formatMoney(totalAmount), foot: `人均 ${Utils.formatMoney(avgAmount)}`, icon: '💰', bg: '#f0fdf4' },
+      { label: '储值余额总额', value: Utils.formatMoney(totalBal), foot: `${balCount} 位客户有余额（预收款）`, icon: '💳', bg: '#ecfeff' },
       { label: '待复购客户', value: repurchase, foot: '超过 30 天未下单', icon: '🔔', bg: '#fef3c7' },
       { label: '复购客户占比', value: (all.length ? Math.round(all.filter(c => c.totalOrders > 1).length / all.length * 100) : 0) + '%', foot: '下单 2 次以上', icon: '🔁', bg: '#fce7f3' }
     ].map(k => `
@@ -117,31 +131,36 @@ if (AdminLayout.init('customers')) {
       ? '<div class="table-empty"><div class="table-empty-icon">👥</div>没有符合条件的客户</div>'
       : `<table class="data">
           <thead><tr>
-            <th style="width:130px">客户</th>
-            <th style="width:112px">手机号</th>
+            <th style="width:126px">客户</th>
+            <th style="width:132px">联系电话</th>
             <th>服务地址</th>
             <th>偏好标签</th>
-            <th style="width:76px">来源</th>
-            <th style="width:74px">订单数</th>
-            <th style="width:104px">累计消费</th>
-            <th style="width:118px">上次服务</th>
-            <th style="width:120px"></th>
+            <th style="width:68px">订单</th>
+            <th style="width:100px">累计消费</th>
+            <th style="width:100px">储值余额</th>
+            <th style="width:112px">上次服务</th>
+            <th style="width:126px"></th>
           </tr></thead>
           <tbody>${list.map(c => {
             const d = daysSince(c.lastServiceDate);
             const need = d !== null && d > 30;
+            const bal = Number(c.balance || 0);
             const lvTag = c.level === 3 ? '<span class="tag tag-svip">SVIP</span>'
                         : c.level === 2 ? '<span class="tag tag-vip">VIP</span>' : '';
             return `<tr>
               <td class="clickable" onclick="location.href='customer-detail.html?id=${c.id}'">
                 <div class="td-strong">${c.name} ${lvTag}</div>
+                <div class="td-muted">${c.source || '-'}</div>
               </td>
-              <td class="td-muted">${c.phone}</td>
-              <td class="td-muted">${(c.address || '').length > 22 ? c.address.slice(0, 22) + '…' : (c.address || '-')}</td>
+              <td><a class="tel" href="tel:${c.phone}" title="点击拨号">📞 ${c.phone}</a></td>
+              <td class="td-muted clickable" onclick="location.href='customer-detail.html?id=${c.id}'">
+                ${(c.address || '').length > 20 ? c.address.slice(0, 20) + '…' : (c.address || '-')}</td>
               <td>${(c.tags || []).map(t => `<span class="tag tag-soft">${t}</span>`).join(' ') || '<span class="td-muted">-</span>'}</td>
-              <td class="td-muted">${c.source || '-'}</td>
               <td class="td-strong">${c.totalOrders || 0}</td>
               <td class="td-money">${Utils.formatMoney(c.totalAmount || 0)}</td>
+              <td>${bal > 0
+                ? '<b style="color:var(--success)">' + Utils.formatMoney(bal) + '</b>'
+                : '<span class="td-muted">—</span>'}</td>
               <td>${c.lastServiceDate
                 ? `${c.lastServiceDate}<div class="${need ? '' : 'td-muted'}" style="${need ? 'color:var(--danger)' : ''};font-size:12px">${d} 天前${need ? ' · 待复购' : ''}</div>`
                 : '<span class="td-muted">从未服务</span>'}</td>
@@ -240,12 +259,12 @@ if (AdminLayout.init('customers')) {
   window.exportCsv = function () {
     const list = getFiltered();
     if (!list.length) { Utils.toast('没有可导出的数据'); return; }
-    let csv = '姓名,手机号,地址,来源,等级,偏好标签,订单数,累计消费,上次服务,备注\n';
+    let csv = '姓名,手机号,地址,来源,等级,偏好标签,订单数,累计消费,储值余额,上次服务,备注\n';
     list.forEach(c => {
       csv += [c.name, c.phone, '"' + (c.address || '') + '"', c.source || '',
         c.level === 3 ? 'SVIP' : c.level === 2 ? 'VIP' : '普通',
         '"' + (c.tags || []).join('、') + '"', c.totalOrders || 0, c.totalAmount || 0,
-        c.lastServiceDate || '', '"' + (c.remark || '') + '"'].join(',') + '\n';
+        Number(c.balance || 0), c.lastServiceDate || '', '"' + (c.remark || '') + '"'].join(',') + '\n';
     });
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');

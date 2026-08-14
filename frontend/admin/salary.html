@@ -43,7 +43,8 @@
     <div class="alert alert-info">
       <span>ℹ️</span>
       <div>工资根据每位阿姨的结算方式（按单 / 按小时 / 底薪+提成 / 包月）与该月「已完成」订单自动计算。
-      满 20 单发全勤奖 200 元，服务满 80 小时发交通补贴 100 元。</div>
+      满 20 单发全勤奖 200 元，服务满 80 小时发交通补贴 100 元。<br>
+      <b>注意区分口径</b>：「订单金额」是客户付款，「阿姨应得」才计入工资。阿姨端只看到后者，与此处同源，不会有出入。</div>
     </div>
 
     <div class="sum-strip" id="sumStrip"></div>
@@ -238,19 +239,28 @@ if (AdminLayout.init('salary')) {
               <div class="card-head"><span class="card-title">订单逐笔明细（${orders.length} 单）</span></div>
               <div class="card-body tight">
                 ${orders.length === 0 ? '<div class="table-empty" style="padding:26px">该月无已完成订单</div>'
-                  : `<table class="data"><thead><tr><th>日期</th><th>客户</th><th>服务类型</th><th>时长</th><th>订单额</th><th>计工资</th></tr></thead>
+                  : `<table class="data"><thead><tr>
+                       <th style="width:74px">日期</th><th>客户</th><th>服务类型</th>
+                       <th style="width:62px">时长</th>
+                       <th style="width:96px">订单金额<div class="td-muted" style="font-weight:400;font-size:11px">客户付款</div></th>
+                       <th style="width:104px">阿姨应得<div class="td-muted" style="font-weight:400;font-size:11px">计入工资</div></th>
+                       <th style="width:92px">公司毛利</th></tr></thead>
                      <tbody>${orders.map(o => {
-                       let pay = '-';
-                       if (s.salaryType === 1) pay = Utils.formatMoney((cfg.perOrder || {})[o.serviceType] || 80);
-                       else if (s.salaryType === 2) pay = Utils.formatMoney(o.duration * (cfg.hourlyRate || 0));
-                       else if (s.salaryType === 3) pay = Utils.formatMoney(o.amount * (cfg.commissionRate || 0)) + ' (提成)';
+                       const mp = SalaryStorage.orderPay(s, o);
                        return `<tr>
                          <td>${Utils.formatDate(o.startTime, 'MM-DD')}</td>
                          <td>${o.customerName}</td><td>${o.serviceType}</td>
                          <td class="td-muted">${o.duration} h</td>
                          <td>${Utils.formatMoney(o.amount)}</td>
-                         <td class="td-money">${pay}</td></tr>`;
-                     }).join('')}</tbody></table>`}
+                         <td class="td-money" style="color:var(--success)">${mp.perOrderBased ? Utils.formatMoney(mp.pay) : '<span class="td-muted">包月</span>'}</td>
+                         <td class="td-muted">${mp.perOrderBased ? Utils.formatMoney(Math.round((o.amount - mp.pay) * 100) / 100) : '—'}</td></tr>`;
+                     }).join('')}</tbody>
+                     <tfoot><tr>
+                       <td colspan="4">合计</td>
+                       <td>${Utils.formatMoney(orders.reduce((a, o) => a + o.amount, 0))}</td>
+                       <td style="color:var(--success)">${Utils.formatMoney(orders.reduce((a, o) => a + SalaryStorage.orderPay(s, o).pay, 0))}</td>
+                       <td>${Utils.formatMoney(orders.reduce((a, o) => a + o.amount - SalaryStorage.orderPay(s, o).pay, 0))}</td>
+                     </tr></tfoot></table>`}
               </div>
             </div>
           </div>

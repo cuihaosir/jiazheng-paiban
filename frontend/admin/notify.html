@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>通知记录 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .msg {
+    display: flex; gap: 13px; padding: 14px 16px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .msg:last-child { border-bottom: none; }
+  .msg-ico {
+    width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+  }
+  .msg-body { flex: 1; min-width: 0; }
+  .msg-top { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; flex-wrap: wrap; }
+  .msg-to { font-size: 14px; font-weight: 600; }
+  .msg-time { font-size: 12px; color: var(--text-tertiary); }
+  .msg-text {
+    font-size: 13.5px; color: var(--text-secondary); line-height: 1.65;
+    background: #fafbfd; border: 1px solid var(--divider);
+    border-radius: 8px; padding: 9px 12px; word-break: break-all;
+  }
+  .cost-strip {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    overflow: hidden; margin-bottom: 16px;
+  }
+  .cost-cell { background: #fff; padding: 15px 18px; }
+  .cost-v { font-size: 21px; font-weight: 700; }
+  .cost-k { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">通知记录</span>
+      <span class="topbar-sub">派单、改期、评价邀请等自动通知</span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" onclick="clearAll()">清空记录</button>
+    </div>
+  </header>
+
+  <div class="page" style="max-width:1100px">
+    <div class="alert alert-warn">
+      <span>⚠️</span>
+      <div>
+        <b>本页为示意，短信未真实发出。</b><br>
+        真实发送需后端对接短信服务商（阿里云短信 / 腾讯云 SMS 等），流程为：
+        ① 企业实名认证 → ② 申请短信签名与模板并等待报备通过 → ③ 后端调用 API 发送。
+        费用约 <b>0.045 元/条</b>。微信通知则需申请服务号/小程序并使用模板消息。
+        此处记录的是「系统在真实环境下会发出的通知内容」。
+      </div>
+    </div>
+
+    <div class="cost-strip" id="costStrip"></div>
+
+    <div class="toolbar">
+      <div class="seg" id="typeSeg"></div>
+      <div class="toolbar-spacer"></div>
+      <span class="td-muted" id="cntLabel"></span>
+    </div>
+
+    <div class="card">
+      <div class="card-body tight">
+        <div id="listBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('notify')) {
+
+  const TYPES = {
+    order_dispatch:  { name: '派单通知', icon: '📋', bg: '#eff6ff' },
+    order_confirmed: { name: '接单确认', icon: '✅', bg: '#f0fdf4' },
+    review_invite:   { name: '评价邀请', icon: '⭐', bg: '#fef3c7' },
+    review_done:     { name: '收到评价', icon: '💬', bg: '#fce7f3' },
+    recharge:        { name: '充值到账', icon: '💳', bg: '#ecfeff' },
+    reschedule:      { name: '改期通知', icon: '🔄', bg: '#f3e8ff' },
+    cancel:          { name: '取消通知', icon: '❌', bg: '#fef2f2' }
+  };
+
+  let filter = 'all';
+
+  function renderCost() {
+    const all = NotifyStorage.getAll();
+    const today = all.filter(x => x.time.slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
+    const monthPrefix = Utils.getCurrentMonth();
+    const month = all.filter(x => x.time.slice(0, 7) === monthPrefix).length;
+
+    document.getElementById('costStrip').innerHTML = `
+      <div class="cost-cell"><div class="cost-v">${all.length}</div><div class="cost-k">累计通知条数</div></div>
+      <div class="cost-cell"><div class="cost-v">${today}</div><div class="cost-k">今日发送</div></div>
+      <div class="cost-cell"><div class="cost-v">${month}</div><div class="cost-k">本月发送</div></div>
+      <div class="cost-cell"><div class="cost-v" style="color:var(--primary)">${Utils.formatMoney(month * 0.045)}</div><div class="cost-k">本月短信成本（按 0.045 元/条估算）</div></div>`;
+  }
+
+  function renderSeg() {
+    const all = NotifyStorage.getAll();
+    let html = `<button class="${filter === 'all' ? 'on' : ''}" onclick="setF('all')">全部 ${all.length}</button>`;
+    Object.keys(TYPES).forEach(k => {
+      const c = all.filter(x => x.type === k).length;
+      if (c > 0) html += `<button class="${filter === k ? 'on' : ''}" onclick="setF('${k}')">${TYPES[k].name} ${c}</button>`;
+    });
+    document.getElementById('typeSeg').innerHTML = html;
+  }
+
+  window.setF = function (k) { filter = k; renderSeg(); render(); };
+
+  window.render = function () {
+    let list = NotifyStorage.getAll();
+    if (filter !== 'all') list = list.filter(x => x.type === filter);
+    document.getElementById('cntLabel').textContent = list.length + ' 条';
+
+    document.getElementById('listBox').innerHTML = list.length === 0
+      ? `<div class="table-empty"><div class="table-empty-icon">📭</div>
+         暂无通知记录<div class="field-hint" style="margin-top:8px">派单、完成订单、充值等操作会自动生成通知</div></div>`
+      : list.slice(0, 100).map(m => {
+          const t = TYPES[m.type] || { name: m.type, icon: '📨', bg: '#f1f5f9' };
+          return `<div class="msg">
+            <div class="msg-ico" style="background:${t.bg}">${t.icon}</div>
+            <div class="msg-body">
+              <div class="msg-top">
+                <span class="tag tag-soft">${t.name}</span>
+                <span class="msg-to">${m.toName}${m.toPhone ? ' · ' + m.toPhone : ''}</span>
+                <span class="msg-time">${Utils.formatDate(m.time, 'MM-DD HH:mm')}</span>
+                <span class="msg-time">${m.channel}</span>
+                ${m.orderId ? `<a class="btn btn-ghost btn-sm" href="order-detail.html?id=${m.orderId}">查看订单</a>` : ''}
+              </div>
+              <div class="msg-text">${m.content}</div>
+            </div>
+          </div>`;
+        }).join('');
+  };
+
+  window.clearAll = function () {
+    if (!confirm('清空所有通知记录？')) return;
+    NotifyStorage.save([]);
+    Utils.toast('已清空');
+    renderCost(); renderSeg(); render();
+  };
+
+  renderCost();
+  renderSeg();
+  render();
+}
+</script>
+</body>
+</html>

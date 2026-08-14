@@ -12,6 +12,32 @@
   .hero-type { font-size: 18px; font-weight: 600; }
   .hero-meta { font-size: 13px; color: var(--text-tertiary); margin-top: 2px; }
   .hero-spacer { flex: 1; }
+
+  /* 一键拨号 */
+  .call {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 13px; border: 1px solid var(--border); border-radius: 8px;
+    background: #fff; font-size: 13.5px; color: var(--text-primary);
+    text-decoration: none; transition: all .15s; white-space: nowrap;
+  }
+  .call:hover { border-color: var(--success); color: var(--success); background: #f0fdf4; }
+  .call-num { font-family: ui-monospace, Consolas, monospace; letter-spacing: .3px; }
+
+  /* 金额口径拆分 */
+  .money-split { display: flex; gap: 1px; background: var(--border); border-radius: 10px; overflow: hidden; }
+  .money-cell { flex: 1; background: #fff; padding: 13px 15px; }
+  .money-cell.mine { background: #f0fdf4; }
+  .money-k { font-size: 12.5px; color: var(--text-tertiary); }
+  .money-v { font-size: 21px; font-weight: 700; margin-top: 2px; }
+  .money-cell.mine .money-v { color: var(--success); }
+  .money-note { font-size: 11.5px; color: var(--text-tertiary); margin-top: 3px; line-height: 1.5; }
+
+  .gps { display: flex; gap: 9px; padding: 11px 13px; border-radius: 9px; font-size: 13px; line-height: 1.6; }
+  .gps-ok { background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d; }
+  .gps-no { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+  .gps-c { font-family: ui-monospace, Consolas, monospace; }
+
+  .stars-big { font-size: 19px; letter-spacing: 2px; }
 </style>
 </head>
 <body>
@@ -67,15 +93,48 @@ if (AdminLayout.init('orders')) {
               <button class="btn btn-danger" onclick="openCancel()">取消订单</button>`;
     } else if (order.status === 3) {
       acts = `<button class="btn btn-success" onclick="setStatus(4)">标记已完成</button>`;
+    } else if (order.status === 4) {
+      acts = `<button class="btn btn-primary" onclick="sendReview()">📩 ${order.reviewInvitedAt ? '重发' : '发送'}评价邀请</button>`;
     }
     document.getElementById('topActions').innerHTML = acts;
+
+    // 阿姨应得（与月度工资算法同源）
+    const mp = SalaryStorage.orderPay(staff, order);
 
     // 时间线
     const tl = [{ t: order.createdAt, text: '订单创建', color: '#94a3b8' }];
     if (order.status >= 2) tl.push({ t: order.createdAt, text: `${order.staffName} 确认接单`, color: '#3b82f6' });
-    if (order.status >= 3) tl.push({ t: order.startTime, text: '阿姨已上门，开始服务', color: '#8b5cf6' });
-    if (order.status >= 4) tl.push({ t: order.endTime, text: '服务完成', color: '#10b981' });
+    if (order.status >= 3) {
+      let at = '阿姨已上门，开始服务';
+      if (order.arriveLat && order.arriveLng) at += '（已 GPS 打卡）';
+      else if (order.arriveGpsErr) at += '（打卡未获取到位置）';
+      tl.push({ t: order.arriveAt || order.startTime, text: at, color: '#8b5cf6' });
+    }
+    if (order.status >= 4) tl.push({ t: order.finishAt || order.endTime, text: '服务完成', color: '#10b981' });
+    if (order.reviewInvitedAt) tl.push({ t: order.reviewInvitedAt, text: '已向客户发送评价邀请短信（模拟）', color: '#0891b2' });
+    if (order.rating > 0) tl.push({ t: order.reviewedAt || order.endTime, text: `客户评价 ${order.rating} 星${order.review ? '：' + order.review : ''}`, color: '#f59e0b' });
     if (order.status === 0) tl.push({ t: order.createdAt, text: '订单已取消：' + (order.cancelReason || '未填写原因'), color: '#ef4444' });
+
+    // GPS 打卡凭证
+    let gpsHtml = '';
+    if (order.arriveAt) {
+      if (order.arriveLat && order.arriveLng) {
+        const lat = Number(order.arriveLat).toFixed(6), lng = Number(order.arriveLng).toFixed(6);
+        gpsHtml = `<div class="gps gps-ok" style="margin-top:12px">
+          <span>📍</span>
+          <div><b>GPS 打卡成功</b> · ${Utils.formatDate(order.arriveAt, 'MM-DD HH:mm')}<br>
+          坐标 <span class="gps-c">${lat}, ${lng}</span>${order.arriveAcc ? '，精度约 ' + Math.round(order.arriveAcc) + ' 米' : ''}<br>
+          <a href="https://uri.amap.com/marker?position=${lng},${lat}&name=打卡位置" target="_blank" rel="noopener"
+             style="color:#15803d;font-weight:600">在高德地图查看 ↗</a></div>
+        </div>`;
+      } else {
+        gpsHtml = `<div class="gps gps-no" style="margin-top:12px">
+          <span>⚠️</span>
+          <div><b>已打卡，但未获取到位置</b> · ${Utils.formatDate(order.arriveAt, 'MM-DD HH:mm')}<br>
+          原因：${order.arriveGpsErr || '未知'}。打卡本身有效，仅缺少位置凭证。</div>
+        </div>`;
+      }
+    }
 
     // 同阿姨当天其他订单
     const dayStart = order.startTime.slice(0, 10);
@@ -105,6 +164,34 @@ if (AdminLayout.init('orders')) {
       <div class="grid-side">
         <div style="display:flex;flex-direction:column;gap:16px">
           <div class="card">
+            <div class="card-head"><span class="card-title">金额构成</span></div>
+            <div class="card-body">
+              <div class="money-split">
+                <div class="money-cell">
+                  <div class="money-k">订单金额（客户付款）</div>
+                  <div class="money-v">${Utils.formatMoney(order.amount)}</div>
+                  <div class="money-note">客户支付给公司的服务费</div>
+                </div>
+                <div class="money-cell mine">
+                  <div class="money-k">阿姨应得</div>
+                  <div class="money-v">${mp.perOrderBased ? Utils.formatMoney(mp.pay) : '不按单计酬'}</div>
+                  <div class="money-note">${mp.note}</div>
+                </div>
+                <div class="money-cell">
+                  <div class="money-k">公司毛利</div>
+                  <div class="money-v">${mp.perOrderBased ? Utils.formatMoney(Math.round((order.amount - mp.pay) * 100) / 100) : '—'}</div>
+                  <div class="money-note">${mp.perOrderBased
+                    ? '毛利率 ' + (order.amount > 0 ? Math.round((order.amount - mp.pay) / order.amount * 100) : 0) + '%'
+                    : '包月阿姨成本按月摊销'}</div>
+                </div>
+              </div>
+              <div class="field-hint" style="margin-top:10px">
+                阿姨端只展示「阿姨应得」，与此处数字同源，避免工资口径误解。
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
             <div class="card-head"><span class="card-title">订单信息</span></div>
             <div class="card-body">
               <dl class="dl">
@@ -112,11 +199,15 @@ if (AdminLayout.init('orders')) {
                 <dt>服务类型</dt><dd>${order.serviceType}</dd>
                 <dt>服务时间</dt><dd>${Utils.formatDate(order.startTime, 'YYYY-MM-DD HH:mm')} – ${Utils.formatDate(order.endTime, 'HH:mm')}（${order.duration} 小时）</dd>
                 <dt>服务地址</dt><dd>${order.address}</dd>
-                <dt>订单来源</dt><dd>${order.source || '-'}</dd>
+                <dt>订单来源</dt><dd>${order.source || '-'}${order.channelOrderNo ? ' <span class="tag tag-soft">' + order.channelOrderNo + '</span>' : ''}</dd>
                 <dt>创建时间</dt><dd>${Utils.formatDate(order.createdAt, 'YYYY-MM-DD HH:mm')}</dd>
                 <dt>客户备注</dt><dd>${order.remark || '<span class="td-muted">无</span>'}</dd>
+                ${order.rating > 0 ? `<dt>客户评价</dt><dd><span class="stars-big">${'⭐'.repeat(order.rating)}</span> ${order.rating} 星
+                  ${(order.reviewTags || []).map(t => `<span class="tag tag-soft">${t}</span>`).join(' ')}
+                  ${order.review ? '<br><span style="color:var(--text-secondary)">「' + order.review + '」</span>' : ''}</dd>` : ''}
                 ${order.cancelReason ? `<dt>取消原因</dt><dd style="color:var(--danger)">${order.cancelReason}</dd>` : ''}
               </dl>
+              ${gpsHtml}
             </div>
           </div>
 
@@ -128,10 +219,19 @@ if (AdminLayout.init('orders')) {
               </div>
               <div class="card-body">
                 <div style="font-size:16px;font-weight:600">${order.customerName}</div>
-                <div class="td-muted" style="margin-bottom:10px">${order.customerPhone}</div>
+                <div style="margin:6px 0 12px">
+                  <a class="call" href="tel:${order.customerPhone}" title="点击拨号">
+                    📞 <span class="call-num">${order.customerPhone}</span>
+                  </a>
+                  <button class="btn btn-ghost btn-sm" style="margin-left:6px"
+                    onclick="copyText('${order.customerPhone}')">复制</button>
+                </div>
                 ${cust ? `<dl class="dl" style="grid-template-columns:80px 1fr">
                   <dt>等级</dt><dd><span class="tag ${cust.level === 3 ? 'tag-svip' : cust.level === 2 ? 'tag-vip' : 'tag-soft'}">${cust.level === 3 ? 'SVIP' : cust.level === 2 ? 'VIP' : '普通'}</span></dd>
                   <dt>累计</dt><dd>${cust.totalOrders} 单 / ${Utils.formatMoney(cust.totalAmount)}</dd>
+                  <dt>储值余额</dt><dd>${Number(cust.balance || 0) > 0
+                    ? '<b style="color:var(--success)">' + Utils.formatMoney(cust.balance) + '</b>'
+                    : '<span class="td-muted">无</span>'}</dd>
                   <dt>偏好</dt><dd>${(cust.tags || []).map(t => `<span class="tag tag-soft">${t}</span>`).join(' ') || '<span class="td-muted">无</span>'}</dd>
                 </dl>` : ''}
               </div>
@@ -143,14 +243,21 @@ if (AdminLayout.init('orders')) {
                 ${staff ? `<a class="btn btn-ghost btn-sm" href="staff-detail.html?id=${staff.id}">阿姨档案 →</a>` : ''}
               </div>
               <div class="card-body">
-                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
                   <span style="font-size:30px">${staff ? staff.avatar : '👩'}</span>
                   <div>
                     <div style="font-size:16px;font-weight:600">${order.staffName}</div>
-                    <div class="td-muted">${staff ? staff.phone + ' · ⭐ ' + staff.rating : ''}</div>
+                    <div class="td-muted">${staff ? '⭐ ' + staff.rating + ' · ' + Utils.getSalaryTypeName(staff.salaryType) : ''}</div>
                   </div>
                 </div>
-                ${staff ? `<div>${staff.skills.map(s => `<span class="tag tag-skill">${s}</span>`).join(' ')}</div>` : ''}
+                ${staff ? `<div style="margin-bottom:12px">
+                  <a class="call" href="tel:${staff.phone}" title="点击拨号">
+                    📞 <span class="call-num">${staff.phone}</span>
+                  </a>
+                  <button class="btn btn-ghost btn-sm" style="margin-left:6px"
+                    onclick="copyText('${staff.phone}')">复制</button>
+                </div>
+                <div>${staff.skills.map(s => `<span class="tag tag-skill">${s}</span>`).join(' ')}</div>` : ''}
               </div>
             </div>
           </div>
@@ -187,8 +294,87 @@ if (AdminLayout.init('orders')) {
   }
 
   window.setStatus = function (s) {
-    OrderStorage.update(id, { status: s });
+    const patch = { status: s };
+    if (s === 3) patch.arriveAt = new Date().toISOString();
+    if (s === 4) patch.finishAt = new Date().toISOString();
+    OrderStorage.update(id, patch);
+
+    const o = OrderStorage.getById(id);
+    if (s === 2) {
+      NotifyStorage.push('order_confirmed', o.staffName, '',
+        `【家政管家】您有新订单：${Utils.formatDate(o.startTime, 'MM-DD HH:mm')} ${o.address}（${o.serviceType}）`, id);
+    }
     Utils.toast('订单状态已更新');
+    render();
+
+    // 完成后自动邀请评价
+    if (s === 4) setTimeout(() => sendReview(true), 300);
+  };
+
+  /** 复制文本到剪贴板 */
+  window.copyText = function (t) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(
+        () => Utils.toast('已复制：' + t),
+        () => Utils.toast('复制失败，请手动选择')
+      );
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); Utils.toast('已复制：' + t); }
+      catch (e) { Utils.toast('复制失败'); }
+      document.body.removeChild(ta);
+    }
+  };
+
+  /** 发送评价邀请（短信为模拟，链接真实可用） */
+  window.sendReview = function (silent) {
+    const o = OrderStorage.getById(id);
+    if (o.status < 4) { Utils.toast('订单完成后才能邀请评价'); return; }
+
+    const link = location.origin +
+      location.pathname.replace(/admin\/order-detail\.html$/, 'review.html') +
+      '?order=' + id;
+    const sms = `【家政管家】您的${o.serviceType}服务已完成，感谢信任！请为${o.staffName}的服务打个分：${link}`;
+
+    OrderStorage.update(id, { reviewInvitedAt: new Date().toISOString() });
+    NotifyStorage.push('review_invite', o.customerName, o.customerPhone, sms, id);
+
+    if (silent) { render(); return; }
+
+    document.getElementById('modalHost').innerHTML = `
+      <div class="mask" onclick="if(event.target===this)closeModal()">
+        <div class="modal">
+          <div class="modal-head">
+            <span class="modal-title">评价邀请已生成</span>
+            <button class="modal-x" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-warn"><span>⚠️</span><div>
+              <b>演示环境：短信未真实发出。</b><br>
+              真实发送需后端对接短信服务商（阿里云短信 / 腾讯云 SMS），
+              并完成企业实名认证与短信模板报备，约 0.045 元/条。
+            </div></div>
+
+            <div class="field">
+              <label class="field-label">将发送给 ${o.customerName}（${o.customerPhone}）</label>
+              <textarea class="textarea" readonly style="min-height:92px">${sms}</textarea>
+            </div>
+
+            <div class="field" style="margin-bottom:0">
+              <label class="field-label">评价链接（可直接复制发给客户）</label>
+              <input class="input" id="revLink" readonly value="${link}">
+              <div class="field-hint">链接是真实可用的，点下方按钮可自己先体验客户端评价页面。</div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeModal()">关闭</button>
+            <button class="btn btn-ghost" onclick="copyText(document.getElementById('revLink').value)">复制链接</button>
+            <button class="btn btn-primary" onclick="window.open(document.getElementById('revLink').value,'_blank')">预览评价页</button>
+          </div>
+        </div>
+      </div>`;
     render();
   };
 

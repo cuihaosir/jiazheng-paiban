@@ -11,6 +11,61 @@
   .legend-swatch { width: 11px; height: 11px; border-radius: 3px; border-left: 3px solid; }
   .load-bar { height: 4px; border-radius: 2px; background: #f1f5f9; margin-top: 4px; overflow: hidden; }
   .load-fill { height: 100%; border-radius: 2px; }
+
+  /* 日视图汇总条 */
+  .sum-strip {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    overflow: hidden; margin-bottom: 14px;
+  }
+  .sum-cell { background: #fff; padding: 14px 16px; }
+  .sum-val { font-size: 21px; font-weight: 700; }
+  .sum-key { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+
+  /* 日视图时间轴 */
+  .tl-day { padding: 6px 0 12px; }
+  .tl-hour {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 18px 6px;
+  }
+  .tl-hour-t {
+    font-size: 13px; font-weight: 700; color: var(--text-secondary);
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  .tl-hour::after { content: ''; flex: 1; height: 1px; background: var(--divider); }
+
+  .tl-job {
+    display: flex; gap: 14px; align-items: stretch;
+    margin: 0 18px 9px; border-radius: 10px;
+    border-left: 4px solid; padding: 12px 14px;
+  }
+  .tl-job.blk-clean { background: #f5f9ff; border-color: #2563eb; }
+  .tl-job.blk-deep  { background: #f4fdf6; border-color: #16a34a; }
+  .tl-job.blk-baby  { background: #fffbf0; border-color: #d97706; }
+  .tl-job.blk-cook  { background: #fdf5f9; border-color: #db2777; }
+  .tl-job.blk-other { background: #faf6ff; border-color: #8b5cf6; }
+
+  .tl-job-main { flex: 1; min-width: 0; cursor: pointer; }
+  .tl-job-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 5px; }
+  .tl-job-time { font-size: 15px; font-weight: 700; font-family: ui-monospace, Consolas, monospace; }
+  .tl-job-type { font-size: 14px; font-weight: 600; }
+  .tl-job-info {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    font-size: 13px; color: var(--text-secondary);
+  }
+  .tl-job-side { text-align: right; flex-shrink: 0; }
+  .tl-job-money { font-size: 16px; font-weight: 700; color: var(--primary); }
+  .tl-job-pay { font-size: 12px; color: var(--success); font-weight: 600; margin-top: 1px; }
+  .tl-job-calls { display: flex; gap: 5px; justify-content: flex-end; margin-top: 6px; }
+  .tel {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 12px; color: var(--text-secondary);
+    padding: 3px 8px; border-radius: 6px;
+    border: 1px solid var(--border); background: #fff;
+    text-decoration: none; white-space: nowrap;
+  }
+  .tel:hover { border-color: var(--success); color: var(--success); background: #f0fdf4; }
 </style>
 </head>
 <body>
@@ -28,6 +83,7 @@
       <button class="btn btn-ghost btn-sm" onclick="shift(-1)" title="上一页">‹</button>
       <button class="btn btn-ghost btn-sm" onclick="goToday()">今天</button>
       <button class="btn btn-ghost btn-sm" onclick="shift(1)" title="下一页">›</button>
+      <button class="btn btn-ghost" onclick="openCopyWeek()">📋 复制排班</button>
       <button class="btn btn-primary" onclick="openCreate()">+ 派单</button>
     </div>
   </header>
@@ -195,67 +251,90 @@ if (AdminLayout.init('schedule')) {
   function renderDay() {
     const dayStart = new Date(anchor); dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
-    const staff = filteredStaff();
+    const staffList = filteredStaff();
+    const staffIds = staffList.map(s => s.id);
     const orders = OrderStorage.getByDateRange(dayStart.toISOString(), dayEnd.toISOString())
-      .filter(o => o.status !== 0);
+      .filter(o => o.status !== 0 && staffIds.indexOf(o.staffId) >= 0)
+      .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
 
     document.getElementById('rangeLabel').textContent =
       Utils.formatDate(dayStart.toISOString(), 'YYYY年MM月DD日') + ' ' + Utils.getWeekDay(dayStart.toISOString());
 
-    const hours = [];
-    for (let h = 7; h <= 20; h++) hours.push(h);
+    const staffMap = {};
+    StaffStorage.getAll().forEach(s => { staffMap[s.id] = s; });
 
-    let html = `<div class="sched-wrap"><table class="sched">
-      <thead><tr><th class="col-staff">阿姨</th>`;
-    hours.forEach(h => { html += `<th style="min-width:58px">${String(h).padStart(2, '0')}:00</th>`; });
-    html += '</tr></thead><tbody>';
+    // 当日汇总
+    const hoursTotal = orders.reduce((a, o) => a + (o.duration || 0), 0);
+    const revenue = orders.reduce((a, o) => a + o.amount, 0);
+    const busyStaff = new Set(orders.map(o => o.staffId)).size;
+    const idleStaff = staffList.filter(s => s.status === 1 && !orders.some(o => o.staffId === s.id));
 
-    if (staff.length === 0) {
-      html += `<tr><td colspan="${hours.length + 1}"><div class="table-empty"><div class="table-empty-icon">🔍</div>没有符合筛选条件的阿姨</div></td></tr>`;
+    let html = `
+      <div class="sum-strip">
+        <div class="sum-cell"><div class="sum-val">${orders.length}</div><div class="sum-key">当日订单</div></div>
+        <div class="sum-cell"><div class="sum-val">${hoursTotal} h</div><div class="sum-key">总服务时长</div></div>
+        <div class="sum-cell"><div class="sum-val" style="color:var(--primary)">${Utils.formatMoney(revenue)}</div><div class="sum-key">当日营收</div></div>
+        <div class="sum-cell"><div class="sum-val">${busyStaff}</div><div class="sum-key">有活的阿姨</div></div>
+        <div class="sum-cell"><div class="sum-val" style="color:${idleStaff.length ? 'var(--warning)' : 'var(--success)'}">${idleStaff.length}</div><div class="sum-key">空闲在岗</div></div>
+      </div>`;
+
+    if (idleStaff.length) {
+      html += `<div class="alert alert-warn" style="margin-bottom:14px"><span>💡</span><div>
+        今天还空着：${idleStaff.map(s => `<b>${s.name}</b>（${s.skills.slice(0, 2).join('/')}）`).join('、')}
+        —— 有新单可以优先派给她们。
+      </div></div>`;
     }
 
-    staff.forEach(s => {
-      const mine = orders.filter(o => o.staffId === s.id);
-      html += `<tr><td class="cell-staff">
-        <div class="sched-staff">
-          <span class="sched-staff-avatar">${s.avatar}</span>
-          <div>
-            <div class="sched-staff-name">${s.name}</div>
-            <div class="sched-staff-meta">${mine.length} 单</div>
+    if (orders.length === 0) {
+      html += `<div class="card"><div class="table-empty">
+        <div class="table-empty-icon">🌤️</div>这一天还没有排班
+        <div style="margin-top:14px"><button class="btn btn-primary btn-sm" onclick="openCreate('','${Utils.formatDate(dayStart.toISOString())}')">+ 给这天派单</button></div>
+      </div></div>`;
+      document.getElementById('viewBox').innerHTML = html;
+      return;
+    }
+
+    // 按小时分组的时间轴
+    html += '<div class="card"><div class="card-body tight"><div class="tl-day">';
+    let lastHour = -1;
+    orders.forEach(o => {
+      const h = new Date(o.startTime).getHours();
+      if (h !== lastHour) {
+        html += `<div class="tl-hour"><span class="tl-hour-t">${String(h).padStart(2, '0')}:00</span></div>`;
+        lastHour = h;
+      }
+      const s = staffMap[o.staffId];
+      const mp = SalaryStorage.orderPay(s, o);
+      html += `
+        <div class="tl-job ${blkClass(o.serviceType)}">
+          <div class="tl-job-main" onclick="location.href='order-detail.html?id=${o.id}'">
+            <div class="tl-job-top">
+              <span class="tl-job-time">${Utils.formatDate(o.startTime, 'HH:mm')}–${Utils.formatDate(o.endTime, 'HH:mm')}</span>
+              <span class="tl-job-type">${o.serviceType} · ${o.duration}h</span>
+              <span class="tag tag-${Utils.getOrderStatusClass(o.status)}">${Utils.getOrderStatusName(o.status)}</span>
+            </div>
+            <div class="tl-job-info">
+              <span>${s ? s.avatar : '👩'} <b>${o.staffName}</b></span>
+              <span>👤 ${o.customerName}</span>
+              <span>📍 ${o.address}</span>
+            </div>
           </div>
-        </div></td>`;
-
-      hours.forEach(h => {
-        const hit = mine.find(o => {
-          const sh = new Date(o.startTime).getHours();
-          const eh = new Date(o.endTime).getHours();
-          return h >= sh && h < eh;
-        });
-        const isStart = hit && new Date(hit.startTime).getHours() === h;
-
-        html += '<td style="height:64px">';
-        if (s.status === 2) {
-          if (h === 7) html += '<div class="blk blk-off"><div class="blk-time">休假</div></div>';
-        } else if (hit && isStart) {
-          html += `<div class="blk ${blkClass(hit.serviceType)}" style="white-space:nowrap" onclick="location.href='order-detail.html?id=${hit.id}'">
-            <div class="blk-time">${Utils.formatDate(hit.startTime, 'HH:mm')}</div>
-            <div class="blk-name">${hit.customerName}</div>
-          </div>`;
-        } else if (hit) {
-          html += `<div class="blk ${blkClass(hit.serviceType)}" style="opacity:.45"></div>`;
-        } else {
-          html += `<button class="cell-add" style="min-height:52px" onclick="openCreate('${s.id}','${Utils.formatDate(dayStart.toISOString())}','${String(h).padStart(2, '0')}:00')">+</button>`;
-        }
-        html += '</td>';
-      });
-      html += '</tr>';
+          <div class="tl-job-side">
+            <div class="tl-job-money">${Utils.formatMoney(o.amount)}</div>
+            <div class="tl-job-pay">阿姨得 ${mp.perOrderBased ? Utils.formatMoney(mp.pay) : '包月'}</div>
+            <div class="tl-job-calls">
+              <a class="tel" href="tel:${o.customerPhone}" title="拨打客户">📞 客户</a>
+              ${s ? `<a class="tel" href="tel:${s.phone}" title="拨打阿姨">📞 阿姨</a>` : ''}
+            </div>
+          </div>
+        </div>`;
     });
+    html += '</div></div></div>';
 
-    html += '</tbody></table></div>';
     document.getElementById('viewBox').innerHTML = html;
   }
 
-  // ===== 派单弹窗 =====
+  // ===== 派单跳转 =====
   window.openCreate = function (staffId, date, time) {
     const params = new URLSearchParams();
     if (staffId) params.set('staffId', staffId);
@@ -263,6 +342,187 @@ if (AdminLayout.init('schedule')) {
     if (time) params.set('time', time);
     location.href = 'order-create.html' + (params.toString() ? '?' + params.toString() : '');
   };
+
+  // ===== 批量排班：整周复制 =====
+
+  /** 计算复制方案：源周 → 目标周，逐单检测冲突 */
+  function buildCopyPlan(srcMonday, weekOffset) {
+    const srcEnd = new Date(srcMonday); srcEnd.setDate(srcEnd.getDate() + 7);
+    const src = OrderStorage.getByDateRange(srcMonday.toISOString(), srcEnd.toISOString())
+      .filter(o => o.status !== 0)
+      .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+    const shiftMs = weekOffset * 7 * 86400000;
+    const plan = [];
+
+    src.forEach(o => {
+      const ns = new Date(new Date(o.startTime).getTime() + shiftMs);
+      const ne = new Date(new Date(o.endTime).getTime() + shiftMs);
+      const staff = StaffStorage.getById(o.staffId);
+
+      let skip = '';
+      if (!staff) skip = '阿姨已删除';
+      else if (staff.status === 3) skip = staff.name + ' 已离职';
+      else if (staff.status === 2) skip = staff.name + ' 休假中';
+
+      // 与目标周已有订单冲突检测（含本次待创建的）
+      let conflicts = [];
+      if (!skip) {
+        conflicts = OrderStorage.checkConflict(o.staffId, ns.toISOString(), ne.toISOString());
+        const dup = plan.filter(p => p.ok && p.staffId === o.staffId &&
+          Utils.isTimeOverlap(ns.toISOString(), ne.toISOString(), p.start, p.end));
+        if (dup.length) conflicts = conflicts.concat(dup.map(d => ({
+          startTime: d.start, endTime: d.end, customerName: d.customerName
+        })));
+        if (conflicts.length) skip = '与已有排班冲突';
+      }
+
+      plan.push({
+        ok: !skip,
+        reason: skip,
+        srcId: o.id,
+        staffId: o.staffId,
+        staffName: o.staffName,
+        customerId: o.customerId,
+        customerName: o.customerName,
+        customerPhone: o.customerPhone,
+        serviceType: o.serviceType,
+        duration: o.duration,
+        address: o.address,
+        amount: o.amount,
+        source: o.source,
+        remark: o.remark,
+        start: ns.toISOString(),
+        end: ne.toISOString(),
+        conflicts: conflicts
+      });
+    });
+
+    return plan;
+  }
+
+  window.openCopyWeek = function () {
+    const srcMonday = Utils.getMonday(anchor);
+    const srcEnd = new Date(srcMonday); srcEnd.setDate(srcEnd.getDate() + 6);
+
+    document.getElementById('modalHost').innerHTML = `
+      <div class="mask" onclick="if(event.target===this)closeModal()">
+        <div class="modal wide">
+          <div class="modal-head">
+            <span class="modal-title">批量复制排班</span>
+            <button class="modal-x" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-info"><span>ℹ️</span><div>
+              把一整周的排班按相同的「星期 + 时间 + 阿姨 + 客户」复制到目标周，
+              适合固定客户、固定档期的排班。复制前会逐单检测冲突，冲突的自动跳过。
+            </div></div>
+
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">源周（要复制的）</label>
+                <input class="input" readonly value="${Utils.formatDate(srcMonday.toISOString(), 'MM/DD')} – ${Utils.formatDate(srcEnd.toISOString(), 'MM/DD')}">
+                <div class="field-hint">即当前查看的这一周</div>
+              </div>
+              <div class="field">
+                <label class="field-label">复制到</label>
+                <select class="select" id="cpOffset" onchange="refreshPlan()">
+                  <option value="1">下一周</option>
+                  <option value="2">两周后</option>
+                  <option value="3">三周后</option>
+                  <option value="4">四周后</option>
+                </select>
+              </div>
+            </div>
+
+            <div id="planBox"></div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+            <button class="btn btn-primary" id="cpBtn" onclick="doCopyWeek()">确认复制</button>
+          </div>
+        </div>
+      </div>`;
+    refreshPlan();
+  };
+
+  window.refreshPlan = function () {
+    const off = Number(document.getElementById('cpOffset').value);
+    const srcMonday = Utils.getMonday(anchor);
+    const plan = buildCopyPlan(srcMonday, off);
+    const okList = plan.filter(p => p.ok);
+    const skipList = plan.filter(p => !p.ok);
+
+    const tgtMonday = new Date(srcMonday); tgtMonday.setDate(tgtMonday.getDate() + off * 7);
+    const tgtEnd = new Date(tgtMonday); tgtEnd.setDate(tgtEnd.getDate() + 6);
+
+    let html = '';
+    if (plan.length === 0) {
+      html = `<div class="alert alert-warn"><span>⚠️</span><div>当前这一周没有可复制的排班。</div></div>`;
+      document.getElementById('cpBtn').disabled = true;
+    } else {
+      document.getElementById('cpBtn').disabled = okList.length === 0;
+      html = `<div class="alert ${okList.length ? 'alert-ok' : 'alert-warn'}"><span>${okList.length ? '✅' : '⚠️'}</span><div>
+        目标周 <b>${Utils.formatDate(tgtMonday.toISOString(), 'MM/DD')} – ${Utils.formatDate(tgtEnd.toISOString(), 'MM/DD')}</b>：
+        将新建 <b>${okList.length}</b> 单${skipList.length ? '，跳过 <b>' + skipList.length + '</b> 单' : ''}。
+      </div></div>
+
+      <div class="table-wrap" style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:9px">
+        <table class="data">
+          <thead><tr><th style="width:130px">新时间</th><th>阿姨</th><th>客户</th><th>服务</th><th style="width:82px">金额</th><th style="width:150px">结果</th></tr></thead>
+          <tbody>${plan.map(p => `
+            <tr>
+              <td>${Utils.formatDate(p.start, 'MM-DD')} ${Utils.getWeekDay(p.start)}
+                <div class="td-muted">${Utils.formatDate(p.start, 'HH:mm')}–${Utils.formatDate(p.end, 'HH:mm')}</div></td>
+              <td>${p.staffName}</td>
+              <td>${p.customerName}</td>
+              <td class="td-muted">${p.serviceType}</td>
+              <td class="td-money">${Utils.formatMoney(p.amount)}</td>
+              <td>${p.ok
+                ? '<span class="tag tag-completed">将创建</span>'
+                : '<span class="tag tag-cancelled">跳过</span><div class="td-muted" style="font-size:11.5px">' + p.reason + '</div>'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    }
+    document.getElementById('planBox').innerHTML = html;
+  };
+
+  window.doCopyWeek = function () {
+    const off = Number(document.getElementById('cpOffset').value);
+    const srcMonday = Utils.getMonday(anchor);
+    const plan = buildCopyPlan(srcMonday, off).filter(p => p.ok);
+    if (!plan.length) { Utils.toast('没有可复制的订单'); return; }
+
+    let n = 0;
+    plan.forEach(p => {
+      // 逐单再次检测，防止批量过程中互相冲突
+      if (OrderStorage.checkConflict(p.staffId, p.start, p.end).length) return;
+      OrderStorage.add({
+        customerId: p.customerId, customerName: p.customerName, customerPhone: p.customerPhone,
+        staffId: p.staffId, staffName: p.staffName,
+        serviceType: p.serviceType,
+        startTime: p.start, endTime: p.end, duration: p.duration,
+        address: p.address, amount: p.amount,
+        status: 1, source: p.source || '排班复制', remark: p.remark || '',
+        cancelReason: '', rating: 0
+      });
+      n++;
+    });
+
+    closeModal();
+    Utils.toast('已复制 ' + n + ' 单到目标周，状态为待确认');
+    // 跳到目标周查看
+    anchor = new Date(srcMonday);
+    anchor.setDate(anchor.getDate() + off * 7);
+    if (view === 'day') view = 'week';
+    document.getElementById('segWeek').className = 'on';
+    document.getElementById('segDay').className = '';
+    render();
+  };
+
+  window.closeModal = function () { document.getElementById('modalHost').innerHTML = ''; };
 
   render();
 }

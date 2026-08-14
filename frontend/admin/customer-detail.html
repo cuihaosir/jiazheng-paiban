@@ -18,6 +18,45 @@
   .stat-cell { background: #fff; padding: 15px 18px; }
   .stat-val { font-size: 21px; font-weight: 700; }
   .stat-key { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+
+  .call {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px;
+    background: #fff; font-size: 13.5px; text-decoration: none;
+    color: var(--text-primary); font-family: ui-monospace, Consolas, monospace;
+  }
+  .call:hover { border-color: var(--success); color: var(--success); background: #f0fdf4; }
+
+  /* 储值 */
+  .bal-hero {
+    display: flex; align-items: center; gap: 18px;
+    padding: 18px; background: linear-gradient(135deg, #065f46 0%, #0891b2 100%);
+    border-radius: var(--radius-lg); color: #fff; margin-bottom: 14px;
+  }
+  .bal-v { font-size: 32px; font-weight: 800; letter-spacing: -.5px; }
+  .bal-k { font-size: 13px; opacity: .85; }
+  .bal-spacer { flex: 1; }
+  .bal-btn {
+    padding: 9px 18px; border-radius: 9px; border: none; cursor: pointer;
+    background: rgba(255,255,255,.2); color: #fff; font-size: 14px; font-weight: 600;
+  }
+  .bal-btn:hover { background: rgba(255,255,255,.3); }
+
+  .log-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 0; border-bottom: 1px solid var(--divider); font-size: 13.5px;
+  }
+  .log-row:last-child { border-bottom: none; }
+  .log-ico {
+    width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+  }
+  .log-in { background: #f0fdf4; }
+  .log-out { background: #fef2f2; }
+  .log-body { flex: 1; min-width: 0; }
+  .log-chg { font-weight: 700; white-space: nowrap; }
+  .log-plus { color: var(--success); }
+  .log-minus { color: var(--danger); }
 </style>
 </head>
 <body>
@@ -35,6 +74,8 @@
   <div class="page" id="page"></div>
 </div>
 
+<div id="modalHost"></div>
+
 <script src="../shared/scripts/utils.js"></script>
 <script src="../shared/scripts/mock-data.js"></script>
 <script src="../shared/scripts/storage.js"></script>
@@ -51,9 +92,12 @@ if (AdminLayout.init('customers')) {
   } else {
     document.getElementById('nameLabel').textContent = c.name;
     document.getElementById('topActions').innerHTML =
-      `<button class="btn btn-primary" onclick="location.href='order-create.html?customerId=${c.id}'">+ 为她下单</button>`;
+      `<a class="call" href="tel:${c.phone}">📞 ${c.phone}</a>
+       <button class="btn btn-ghost" onclick="openRecharge()">💳 储值充值</button>
+       <button class="btn btn-primary" onclick="location.href='order-create.html?customerId=${c.id}'">+ 为她下单</button>`;
 
     const orders = OrderStorage.getByCustomer(id).sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+    const balLogs = BalanceStorage.getByCustomer(id);
     const done = orders.filter(o => o.status === 4);
     const avg = done.length ? Math.round(done.reduce((a, o) => a + o.amount, 0) / done.length) : 0;
     const days = c.lastServiceDate ? Utils.daysBetween(c.lastServiceDate, new Date().toISOString()) : null;
@@ -108,6 +152,19 @@ if (AdminLayout.init('customers')) {
         </div>
       </div>
 
+      <div class="bal-hero">
+        <div>
+          <div class="bal-k">会员储值余额</div>
+          <div class="bal-v">${Utils.formatMoney(c.balance || 0)}</div>
+        </div>
+        <div class="bal-spacer"></div>
+        <div style="text-align:right">
+          <div class="bal-k">累计充值 ${Utils.formatMoney(balLogs.filter(l => l.type === 'recharge').reduce((a, l) => a + l.change, 0))}</div>
+          <div class="bal-k">累计消费 ${Utils.formatMoney(Math.abs(balLogs.filter(l => l.type === 'consume').reduce((a, l) => a + l.change, 0)))}</div>
+        </div>
+        <button class="bal-btn" onclick="openRecharge()">充值</button>
+      </div>
+
       <div class="grid-side">
         <div class="card">
           <div class="card-head"><span class="card-title">服务记录（${orders.length}）</span></div>
@@ -159,6 +216,32 @@ if (AdminLayout.init('customers')) {
           </div>
 
           <div class="card">
+            <div class="card-head">
+              <span class="card-title">储值流水</span>
+              <button class="btn btn-ghost btn-sm" onclick="openRecharge()">充值</button>
+            </div>
+            <div class="card-body">
+              ${balLogs.length === 0
+                ? '<div class="td-muted" style="text-align:center;padding:18px">暂无储值记录</div>'
+                : balLogs.slice(0, 12).map(l => {
+                    const isIn = l.change > 0;
+                    return `<div class="log-row">
+                      <div class="log-ico ${isIn ? 'log-in' : 'log-out'}">${l.type === 'recharge' ? '💳' : l.type === 'consume' ? '🧾' : '⚙️'}</div>
+                      <div class="log-body">
+                        <div>${l.type === 'recharge' ? '充值' : l.type === 'consume' ? '消费扣款' : '手动调整'}
+                          ${l.bonus > 0 ? `<span class="tag tag-completed" style="font-size:11px">赠${l.bonus}</span>` : ''}</div>
+                        <div class="td-muted" style="font-size:12px">${Utils.formatDate(l.time, 'YYYY-MM-DD HH:mm')}${l.remark ? ' · ' + l.remark : ''}</div>
+                      </div>
+                      <div style="text-align:right">
+                        <div class="log-chg ${isIn ? 'log-plus' : 'log-minus'}">${isIn ? '+' : ''}${Utils.formatMoney(l.change)}</div>
+                        <div class="td-muted" style="font-size:11.5px">余 ${Utils.formatMoney(l.balanceAfter)}</div>
+                      </div>
+                    </div>`;
+                  }).join('')}
+            </div>
+          </div>
+
+          <div class="card">
             <div class="card-head"><span class="card-title">备注</span></div>
             <div class="card-body">
               <div style="font-size:13.5px;line-height:1.7">${c.remark || '<span class="td-muted">暂无备注</span>'}</div>
@@ -167,6 +250,107 @@ if (AdminLayout.init('customers')) {
         </div>
       </div>`;
   }
+
+  // ===== 储值充值 =====
+  window.openRecharge = function () {
+    const cur = CustomerStorage.getById(id);
+    document.getElementById('modalHost').innerHTML = `
+      <div class="mask" onclick="if(event.target===this)closeModal()">
+        <div class="modal">
+          <div class="modal-head">
+            <span class="modal-title">会员储值充值</span>
+            <button class="modal-x" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-info"><span>💳</span><div>
+              ${cur.name} 当前余额 <b>${Utils.formatMoney(cur.balance || 0)}</b>。
+              储值后下单可直接用余额抵扣，充值赠送金额也计入余额。
+            </div></div>
+
+            <div class="field">
+              <label class="field-label">选择充值方案</label>
+              <div class="chip-group" id="planChips">
+                <div class="chip" data-a="500"  data-b="0"   onclick="pickPlan(this,500,0)">500 元</div>
+                <div class="chip" data-a="1000" data-b="100" onclick="pickPlan(this,1000,100)">1000 送 100</div>
+                <div class="chip" data-a="2000" data-b="300" onclick="pickPlan(this,2000,300)">2000 送 300</div>
+                <div class="chip" data-a="5000" data-b="1000" onclick="pickPlan(this,5000,1000)">5000 送 1000</div>
+              </div>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">实收金额 <span class="req">*</span></label>
+                <input class="input" id="rcAmount" type="number" min="1" placeholder="客户实付">
+              </div>
+              <div class="field">
+                <label class="field-label">赠送金额</label>
+                <input class="input" id="rcBonus" type="number" min="0" value="0">
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="field-label">支付方式</label>
+              <select class="select" id="rcPay">
+                <option>微信</option><option>支付宝</option><option>现金</option><option>银行转账</option>
+              </select>
+            </div>
+
+            <div class="field" style="margin-bottom:0">
+              <label class="field-label">备注</label>
+              <input class="input" id="rcRemark" placeholder="选填">
+            </div>
+
+            <div class="alert alert-ok" style="margin:14px 0 0" id="rcPreview"></div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+            <button class="btn btn-primary" onclick="doRecharge()">确认充值</button>
+          </div>
+        </div>
+      </div>`;
+    ['rcAmount', 'rcBonus'].forEach(x =>
+      document.getElementById(x).addEventListener('input', rcPreview));
+    rcPreview();
+  };
+
+  window.pickPlan = function (el, a, b) {
+    document.querySelectorAll('#planChips .chip').forEach(c => c.classList.remove('on'));
+    el.classList.add('on');
+    document.getElementById('rcAmount').value = a;
+    document.getElementById('rcBonus').value = b;
+    rcPreview();
+  };
+
+  function rcPreview() {
+    const a = Number(document.getElementById('rcAmount').value) || 0;
+    const b = Number(document.getElementById('rcBonus').value) || 0;
+    const cur = CustomerStorage.getById(id);
+    const before = Number(cur.balance || 0);
+    document.getElementById('rcPreview').innerHTML = a > 0
+      ? `<span>✅</span><div>实收 <b>${Utils.formatMoney(a)}</b>${b > 0 ? ' + 赠送 <b>' + Utils.formatMoney(b) + '</b>' : ''}
+         ，余额 ${Utils.formatMoney(before)} → <b>${Utils.formatMoney(before + a + b)}</b></div>`
+      : '<span>ℹ️</span><div>请填写实收金额</div>';
+  }
+
+  window.doRecharge = function () {
+    const a = Number(document.getElementById('rcAmount').value);
+    const b = Number(document.getElementById('rcBonus').value) || 0;
+    if (!a || a <= 0) { Utils.toast('请填写实收金额'); return; }
+
+    const pay = document.getElementById('rcPay').value;
+    const note = document.getElementById('rcRemark').value.trim();
+    const me = UserStorage.get();
+
+    BalanceStorage.recharge(id, a, b, (pay + '充值' + (note ? '·' + note : '')), me ? me.name : '');
+    NotifyStorage.push('recharge', c.name, c.phone,
+      `【家政管家】您已成功充值 ${a} 元${b > 0 ? '，赠送 ' + b + ' 元' : ''}，当前余额 ${CustomerStorage.getById(id).balance} 元。`, '');
+
+    closeModal();
+    Utils.toast('充值成功');
+    location.reload();
+  };
+
+  window.closeModal = function () { document.getElementById('modalHost').innerHTML = ''; };
 }
 </script>
 </body>

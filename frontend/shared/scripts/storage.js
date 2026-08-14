@@ -341,6 +341,47 @@ const SalaryStorage = {
     return this.getAll().find(r => r.staffId === staffId && r.month === month) || null;
   },
 
+  /**
+   * 单笔订单「阿姨应得」——口径与月度工资计算完全一致
+   * 注意：订单金额是客户付款，阿姨应得由其工资规则决定，两者不同
+   * @returns {{pay:number, note:string, perOrderBased:boolean}}
+   */
+  orderPay(staff, order) {
+    if (!staff || !order) return { pay: 0, note: '', perOrderBased: false };
+    const cfg = staff.salaryConfig || {};
+
+    switch (staff.salaryType) {
+      case 1: { // 按单结算
+        const table = cfg.perOrder || {};
+        const v = table[order.serviceType] === undefined ? 80 : table[order.serviceType];
+        return { pay: v, note: '按单计酬 ' + v + ' 元/单', perOrderBased: true };
+      }
+      case 2: { // 按小时
+        const r = cfg.hourlyRate || 0;
+        return {
+          pay: Math.round((order.duration || 0) * r * 100) / 100,
+          note: (order.duration || 0) + ' 小时 × ' + r + ' 元/时',
+          perOrderBased: true
+        };
+      }
+      case 3: { // 底薪+提成
+        const r = cfg.commissionRate || 0;
+        return {
+          pay: Math.round((order.amount || 0) * r * 100) / 100,
+          note: '提成 ' + Math.round(r * 100) + '%，另有月底薪 ' + (cfg.baseSalary || 0) + ' 元',
+          perOrderBased: true
+        };
+      }
+      case 4: // 包月
+        return {
+          pay: 0,
+          note: '包月固定 ' + (cfg.monthlyPay || 0) + ' 元/月，不按单计酬',
+          perOrderBased: false
+        };
+    }
+    return { pay: 0, note: '', perOrderBased: false };
+  },
+
   /** 计算单个阿姨工资 */
   calculateSalary(staffId, month) {
     const staff = StaffStorage.getById(staffId);
@@ -424,6 +465,258 @@ const SalaryStorage = {
   }
 };
 
+/** 会员储值流水存储 */
+const BalanceStorage = {
+  _key: 'jz_balance_logs',
+
+  getAll() {
+    try {
+      return JSON.parse(localStorage.getItem(this._key) || '[]');
+    } catch (e) {
+      return [];
+    }
+  },
+
+  save(list) {
+    try {
+      localStorage.setItem(this._key, JSON.stringify(list));
+    } catch (e) {
+      if (e.name === 'QuotaExceededError' || e.code === 22) Utils.toast('存储空间不足');
+    }
+  },
+
+  getByCustomer(customerId) {
+    return this.getAll().filter(r => r.customerId === customerId);
+  },
+
+  /**
+   * 充值
+   * @param {string} customerId
+   * @param {number} amount 实付金额
+   * @param {number} bonus 赠送金额
+   */
+  recharge(customerId, amount, bonus, remark, operator) {
+    const c = CustomerStorage.getById(customerId);
+    if (!c) return null;
+    const gain = Number(amount) + Number(bonus || 0);
+    const before = Number(c.balance || 0);
+    const after = Math.round((before + gain) * 100) / 100;
+
+    CustomerStorage.update(customerId, { balance: after });
+
+    const log = {
+      id: 'bal' + Utils.generateId(),
+      customerId: customerId,
+      customerName: c.name,
+      type: 'recharge',
+      amount: Number(amount),
+      bonus: Number(bonus || 0),
+      change: gain,
+      balanceBefore: before,
+      balanceAfter: after,
+      orderId: '',
+      remark: remark || '',
+      operator: operator || '',
+      time: new Date().toISOString()
+    };
+    const list = this.getAll();
+    list.unshift(log);
+    this.save(list);
+    return log;
+  },
+
+  /** 消费扣款（余额不足返回 null） */
+  consume(customerId, amount, orderId, remark, operator) {
+    const c = CustomerStorage.getById(customerId);
+    if (!c) return null;
+    const before = Number(c.balance || 0);
+    if (before < Number(amount)) return null;
+    const after = Math.round((before - Number(amount)) * 100) / 100;
+
+    CustomerStorage.update(customerId, { balance: after });
+
+    const log = {
+      id: 'bal' + Utils.generateId(),
+      customerId: customerId,
+      customerName: c.name,
+      type: 'consume',
+      amount: Number(amount),
+      bonus: 0,
+      change: -Number(amount),
+      balanceBefore: before,
+      balanceAfter: after,
+      orderId: orderId || '',
+      remark: remark || '',
+      operator: operator || '',
+      time: new Date().toISOString()
+    };
+    const list = this.getAll();
+    list.unshift(log);
+    this.save(list);
+    return log;
+  },
+
+  /** 退款/手动调整 */
+  adjust(customerId, delta, remark, operator) {
+    const c = CustomerStorage.getById(customerId);
+    if (!c) return null;
+    const before = Number(c.balance || 0);
+    const after = Math.round((before + Number(delta)) * 100) / 100;
+    if (after < 0) return null;
+
+    CustomerStorage.update(customerId, { balance: after });
+
+    const log = {
+      id: 'bal' + Utils.generateId(),
+      customerId: customerId,
+      customerName: c.name,
+      type: 'adjust',
+      amount: Math.abs(Number(delta)),
+      bonus: 0,
+      change: Number(delta),
+      balanceBefore: before,
+      balanceAfter: after,
+      orderId: '',
+      remark: remark || '',
+      operator: operator || '',
+      time: new Date().toISOString()
+    };
+    const list = this.getAll();
+    list.unshift(log);
+    this.save(list);
+    return log;
+  },
+
+  /** 全部客户储值总额 */
+  totalBalance() {
+    return CustomerStorage.getAll().reduce((sum, c) => sum + Number(c.balance || 0), 0);
+  }
+};
+
+/**
+ * 渠道订单存储（示意实现）
+ * ⚠️ 真实对接说明：美团、58 同城均未提供对外开放的订单查询 API，
+ * 实际接入需与平台签署商务合作、获取商家授权后使用其服务商接口。
+ * 此处用本地模拟数据演示「拉取平台订单 → 确认导入 → 转为系统订单派单」的完整流程。
+ */
+const ChannelStorage = {
+  _key: 'jz_channel_orders',
+
+  getAll() {
+    try {
+      return JSON.parse(localStorage.getItem(this._key) || '[]');
+    } catch (e) {
+      return [];
+    }
+  },
+
+  save(list) {
+    try {
+      localStorage.setItem(this._key, JSON.stringify(list));
+    } catch (e) {
+      if (e.name === 'QuotaExceededError' || e.code === 22) Utils.toast('存储空间不足');
+    }
+  },
+
+  getById(id) {
+    return this.getAll().find(x => x.id === id) || null;
+  },
+
+  getPending() {
+    return this.getAll().filter(x => x.status === 'pending');
+  },
+
+  /** 模拟「同步平台订单」：把待导入订单的日期刷新为未来 1-5 天 */
+  sync() {
+    const list = this.getAll();
+    list.forEach(o => {
+      if (o.status === 'pending' && !o.date) {
+        const d = new Date();
+        d.setDate(d.getDate() + 1 + Math.floor(Math.random() * 5));
+        o.date = Utils.formatDate(d.toISOString());
+      }
+    });
+    this.save(list);
+    return this.getPending();
+  },
+
+  /** 标记为已导入，并记录生成的系统订单号 */
+  markImported(id, orderId, orderNo) {
+    const list = this.getAll();
+    const i = list.findIndex(x => x.id === id);
+    if (i >= 0) {
+      list[i].status = 'imported';
+      list[i].systemOrderId = orderId;
+      list[i].systemOrderNo = orderNo;
+      list[i].importedAt = new Date().toISOString();
+      this.save(list);
+    }
+  },
+
+  /** 忽略某条平台订单 */
+  ignore(id, reason) {
+    const list = this.getAll();
+    const i = list.findIndex(x => x.id === id);
+    if (i >= 0) {
+      list[i].status = 'ignored';
+      list[i].ignoreReason = reason || '';
+      this.save(list);
+    }
+  },
+
+  initMockData() {
+    if (this.getAll().length > 0) return;
+    this.save(MockData.channelOrders.map(o => Object.assign({}, o)));
+    this.sync();
+  }
+};
+
+/**
+ * 通知记录存储（短信/微信通知 · 示意实现）
+ * ⚠️ 真实发送需后端对接短信服务商（如阿里云短信、腾讯云 SMS），
+ * 需企业实名认证并报备模板。此处仅记录「本应发送」的通知，用于演示流程。
+ */
+const NotifyStorage = {
+  _key: 'jz_notify_logs',
+
+  getAll() {
+    try {
+      return JSON.parse(localStorage.getItem(this._key) || '[]');
+    } catch (e) {
+      return [];
+    }
+  },
+
+  save(list) {
+    try {
+      localStorage.setItem(this._key, JSON.stringify(list));
+    } catch (e) {
+      if (e.name === 'QuotaExceededError' || e.code === 22) Utils.toast('存储空间不足');
+    }
+  },
+
+  /** 记录一条模拟通知 */
+  push(type, toName, toPhone, content, orderId) {
+    const list = this.getAll();
+    list.unshift({
+      id: 'nt' + Utils.generateId(),
+      type: type,
+      toName: toName,
+      toPhone: toPhone,
+      content: content,
+      orderId: orderId || '',
+      channel: '短信（模拟）',
+      time: new Date().toISOString()
+    });
+    this.save(list.slice(0, 200));
+    return list[0];
+  },
+
+  getByOrder(orderId) {
+    return this.getAll().filter(x => x.orderId === orderId);
+  }
+};
+
 /** 请假记录存储 */
 const LeaveStorage = {
   _key: 'jz_leaves',
@@ -471,4 +764,5 @@ function initAllData() {
   OrderStorage.initMockData();
   LeaveStorage.initMockData();
   SalaryStorage.initMockData();
+  ChannelStorage.initMockData();
 }

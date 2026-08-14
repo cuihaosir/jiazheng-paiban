@@ -103,8 +103,8 @@ if (App.init('me')) {
 
   document.getElementById('grid').innerHTML = `
     <div class="me-grid-c"><div class="me-grid-v">${done.length}</div><div class="me-grid-k">累计完成</div></div>
-    <div class="me-grid-c"><div class="me-grid-v">${monthDone.length}</div><div class="me-grid-k">本月完成</div></div>
-    <div class="me-grid-c"><div class="me-grid-v">${hours} h</div><div class="me-grid-k">累计时长</div></div>`;
+    <div class="me-grid-c"><div class="me-grid-v">${hours} h</div><div class="me-grid-k">累计时长</div></div>
+    <div class="me-grid-c"><div class="me-grid-v">${Utils.formatMoney(App.myPayTotal(monthDone))}</div><div class="me-grid-k">本月我的收入</div></div>`;
 
   const cfg = s.salaryConfig || {};
   let salDesc = '';

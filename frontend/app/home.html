@@ -33,7 +33,7 @@
     <div class="hero-stats">
       <div class="hero-stat"><div class="hero-stat-v" id="s1">0</div><div class="hero-stat-k">今日订单</div></div>
       <div class="hero-stat"><div class="hero-stat-v" id="s2">0</div><div class="hero-stat-k">本月完成</div></div>
-      <div class="hero-stat"><div class="hero-stat-v" id="s3">0</div><div class="hero-stat-k">本月收入</div></div>
+      <div class="hero-stat"><div class="hero-stat-v" id="s3">0</div><div class="hero-stat-k">本月我的收入</div></div>
     </div>
   </div>
 
@@ -96,7 +96,8 @@ if (App.init('home')) {
   }).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
 
   const monthDone = mine.filter(o => o.status === 4 && new Date(o.startTime) >= monthStart);
-  const income = monthDone.reduce((a, o) => a + o.amount, 0);
+  // 收入 = 我实际应得，不是客户付款额
+  const income = App.myPayTotal(monthDone);
 
   document.getElementById('s1').textContent = today.length;
   document.getElementById('s2').textContent = monthDone.length;

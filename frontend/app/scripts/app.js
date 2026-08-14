@@ -27,6 +27,23 @@ const App = {
     return OrderStorage.getByStaff(this.me().id);
   },
 
+  /** 当前阿姨的完整档案（含工资规则），带缓存 */
+  profile() {
+    if (!this._profile) this._profile = StaffStorage.getById(this.me().id);
+    return this._profile;
+  },
+
+  /** 这一单我能拿多少（不是客户付的钱） */
+  myPay(order) {
+    return SalaryStorage.orderPay(this.profile(), order);
+  },
+
+  /** 一批订单我的总收入 */
+  myPayTotal(orders) {
+    const p = this.profile();
+    return Math.round(orders.reduce((sum, o) => sum + SalaryStorage.orderPay(p, o).pay, 0) * 100) / 100;
+  },
+
   /** 待接单数量（用于Tab红点） */
   pendingCount() {
     return this.myOrders().filter(o => o.status === 1).length;
@@ -71,10 +88,11 @@ const App = {
     location.href = 'tel:' + phone;
   },
 
-  /** 渲染一个订单卡片 */
+  /** 渲染一个订单卡片（金额一律显示「我的收入」，不显示客户付款额，避免误解） */
   jobCard(o, opts) {
     opts = opts || {};
     const showDate = opts.showDate;
+    const mp = this.myPay(o);
     return `
       <div class="job st-${this.stCls(o.status)}" onclick="location.href='order-detail.html?id=${o.id}'">
         <div class="job-head">
@@ -85,7 +103,10 @@ const App = {
         <div class="job-line"><span class="job-line-icon">👤</span><span>${o.customerName}</span></div>
         <div class="job-line"><span class="job-line-icon">📍</span><span>${o.address}</span></div>
         <div class="job-foot">
-          <span class="job-money">${Utils.formatMoney(o.amount)}</span>
+          <span>
+            <span class="job-money">${mp.perOrderBased ? Utils.formatMoney(mp.pay) : '包月'}</span>
+            <span class="job-money-label">${mp.perOrderBased ? '我的收入' : '不按单计酬'}</span>
+          </span>
           <span style="font-size:14px;color:var(--text-tertiary)">查看详情 ›</span>
         </div>
       </div>`;

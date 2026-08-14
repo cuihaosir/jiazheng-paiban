@@ -7,6 +7,7 @@ const AdminLayout = {
     { key: 'dashboard', icon: '📊', name: '工作台', href: 'dashboard.html' },
     { key: 'schedule', icon: '📅', name: '排班日历', href: 'schedule.html' },
     { key: 'orders', icon: '📋', name: '订单管理', href: 'orders.html' },
+    { key: 'channels', icon: '🔗', name: '渠道对接', href: 'channels.html' },
     { group: '资源' },
     { key: 'staff', icon: '👩', name: '阿姨管理', href: 'staff.html' },
     { key: 'customers', icon: '👥', name: '客户管理', href: 'customers.html' },
@@ -14,6 +15,7 @@ const AdminLayout = {
     { key: 'salary', icon: '💰', name: '工资结算', href: 'salary.html' },
     { key: 'stats', icon: '📈', name: '数据统计', href: 'stats.html' },
     { group: '系统' },
+    { key: 'notify', icon: '📨', name: '通知记录', href: 'notify.html' },
     { key: 'settings', icon: '⚙️', name: '系统设置', href: 'settings.html' }
   ],
 

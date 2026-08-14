@@ -153,6 +153,22 @@ button { font-family: inherit; }
   margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--divider);
 }
 .job-money { font-size: 18px; font-weight: 700; color: var(--brand); }
+.job-money-label { font-size: 12.5px; color: var(--text-tertiary); margin-left: 5px; }
+
+/* 收入口径对照（客户付款 vs 我的收入） */
+.pay-split {
+  display: flex; align-items: stretch;
+  border: 1.5px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; margin-top: 4px;
+}
+.pay-split-cell { flex: 1; padding: 13px 14px; }
+.pay-split-cell + .pay-split-cell { border-left: 1.5px solid var(--border); }
+.pay-split-cell.mine { background: var(--brand-bg); }
+.pay-split-k { font-size: 13px; color: var(--text-tertiary); }
+.pay-split-v { font-size: 22px; font-weight: 700; margin-top: 2px; }
+.pay-split-cell.mine .pay-split-v { color: var(--brand-dark); }
+.pay-split-cell.other .pay-split-v { color: var(--text-secondary); }
+.pay-split-note { font-size: 12px; color: var(--text-tertiary); margin-top: 3px; line-height: 1.5; }
 
 /* ========== 标签 ========== */
 

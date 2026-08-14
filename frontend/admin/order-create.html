@@ -102,6 +102,7 @@
                 </select>
               </div>
             </div>
+            <div id="balBox"></div>
             <div class="field" style="margin-bottom:0">
               <label class="field-label">客户备注</label>
               <textarea class="textarea" id="remark" placeholder="特殊要求，如：家里有猫、需自带工具、对清洁剂过敏"></textarea>
@@ -197,10 +198,52 @@ if (AdminLayout.init('orders')) {
     hint.innerHTML = `${level}客户 · 累计 ${c.totalOrders} 单 / ${Utils.formatMoney(c.totalAmount)}`
       + (c.tags && c.tags.length ? ` · 偏好：${c.tags.join('、')}` : '')
       + (c.remark ? `<br>备注：${c.remark}` : '');
+    renderBalance();
     recommend();
     summary();
   };
   if (pCust) onCustomer();
+
+  /** 储值抵扣区（仅老客户且有余额时出现） */
+  function renderBalance() {
+    const cid = document.getElementById('custSel').value;
+    const box = document.getElementById('balBox');
+    if (!cid) { box.innerHTML = ''; return; }
+    const c = CustomerStorage.getById(cid);
+    const bal = c ? Number(c.balance || 0) : 0;
+    if (bal <= 0) {
+      box.innerHTML = `<div class="field-hint" style="margin-bottom:16px">该客户暂无储值余额</div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="alert alert-ok" style="margin-bottom:16px">
+        <span>💳</span>
+        <div>
+          <b>${c.name} 有储值余额 ${Utils.formatMoney(bal)}</b>
+          <label style="display:flex;align-items:center;gap:7px;margin-top:8px;cursor:pointer;font-size:13.5px">
+            <input type="checkbox" id="useBal" onchange="summary()" style="width:15px;height:15px;cursor:pointer">
+            本单使用余额抵扣
+          </label>
+          <div class="field-hint" id="balHint" style="margin-top:5px"></div>
+        </div>
+      </div>`;
+    updateBalHint();
+  }
+
+  function updateBalHint() {
+    const el = document.getElementById('balHint');
+    if (!el) return;
+    const cid = document.getElementById('custSel').value;
+    const c = CustomerStorage.getById(cid);
+    const bal = Number(c.balance || 0);
+    const amt = Number(document.getElementById('amount').value) || 0;
+    if (amt <= 0) { el.textContent = '填写订单金额后显示抵扣结果'; return; }
+    if (bal >= amt) {
+      el.innerHTML = `可全额抵扣，扣款后余额 <b>${Utils.formatMoney(bal - amt)}</b>`;
+    } else {
+      el.innerHTML = `余额不足，可抵扣 ${Utils.formatMoney(bal)}，还需现付 <b>${Utils.formatMoney(amt - bal)}</b>`;
+    }
+  }
 
   function timeRange() {
     const date = document.getElementById('date').value;
@@ -295,11 +338,22 @@ if (AdminLayout.init('orders')) {
   }
 
   function summary() {
+    updateBalHint();
     const tr = timeRange();
     const staff = selStaffId ? StaffStorage.getById(selStaffId) : null;
     const amount = Number(document.getElementById('amount').value) || 0;
     const dur = document.getElementById('dur').value;
     const name = document.getElementById('custName').value.trim();
+
+    // 阿姨应得（与工资算法同源）
+    const mp = staff ? SalaryStorage.orderPay(staff, { serviceType: selType, duration: Number(dur), amount: amount }) : null;
+
+    // 余额抵扣
+    const useBal = document.getElementById('useBal') && document.getElementById('useBal').checked;
+    const cid = document.getElementById('custSel').value;
+    const c = cid ? CustomerStorage.getById(cid) : null;
+    const bal = c ? Number(c.balance || 0) : 0;
+    const deduct = useBal ? Math.min(bal, amount) : 0;
 
     document.getElementById('summary').innerHTML = `
       <div class="sum-row"><span class="sum-k">客户</span><span class="sum-v">${name || '<span class="td-muted">未填写</span>'}</span></div>
@@ -309,11 +363,17 @@ if (AdminLayout.init('orders')) {
         : '<span class="td-muted">未选择</span>'}</span></div>
       <div class="sum-row"><span class="sum-k">时长</span><span class="sum-v">${dur} 小时</span></div>
       <div class="sum-row"><span class="sum-k">指派阿姨</span><span class="sum-v">${staff ? staff.avatar + ' ' + staff.name : '<span class="td-muted">未指派</span>'}</span></div>
-      <div class="sum-total"><span class="sum-k">订单金额</span><span class="sum-total-v">${Utils.formatMoney(amount)}</span></div>`;
+      <div class="sum-row"><span class="sum-k">阿姨应得</span><span class="sum-v" style="color:var(--success)">${mp
+        ? (mp.perOrderBased ? Utils.formatMoney(mp.pay) : '包月，不按单计')
+        : '<span class="td-muted">—</span>'}</span></div>
+      ${mp && mp.perOrderBased ? `<div class="sum-row"><span class="sum-k">公司毛利</span><span class="sum-v">${Utils.formatMoney(Math.round((amount - mp.pay) * 100) / 100)}</span></div>` : ''}
+      ${deduct > 0 ? `<div class="sum-row"><span class="sum-k">储值抵扣</span><span class="sum-v" style="color:var(--success)">−${Utils.formatMoney(deduct)}</span></div>` : ''}
+      <div class="sum-total"><span class="sum-k">${deduct > 0 ? '客户还需付' : '订单金额'}</span><span class="sum-total-v">${Utils.formatMoney(amount - deduct)}</span></div>`;
   }
 
   ['custName', 'custPhone', 'amount'].forEach(id =>
     document.getElementById(id).addEventListener('input', summary));
+  renderBalance();
 
   window.submit = function () {
     const name = document.getElementById('custName').value.trim();
@@ -344,7 +404,14 @@ if (AdminLayout.init('orders')) {
     }
 
     const staff = StaffStorage.getById(selStaffId);
-    OrderStorage.add({
+
+    // 储值抵扣
+    const useBal = document.getElementById('useBal') && document.getElementById('useBal').checked;
+    const cBefore = CustomerStorage.getById(custId);
+    const bal = Number(cBefore.balance || 0);
+    const deduct = useBal ? Math.min(bal, amount) : 0;
+
+    const order = OrderStorage.add({
       customerId: custId, customerName: name, customerPhone: phone,
       staffId: selStaffId, staffName: staff.name,
       serviceType: selType,
@@ -352,8 +419,15 @@ if (AdminLayout.init('orders')) {
       address: addr, amount, status: 1,
       source: document.getElementById('source').value,
       remark: document.getElementById('remark').value.trim(),
-      cancelReason: '', rating: 0
+      cancelReason: '', rating: 0,
+      balanceUsed: deduct
     });
+
+    if (deduct > 0) {
+      const me = UserStorage.get();
+      BalanceStorage.consume(custId, deduct, order.id,
+        selType + ' ' + Utils.formatDate(tr.start, 'MM-DD'), me ? me.name : '');
+    }
 
     const c = CustomerStorage.getById(custId);
     CustomerStorage.update(custId, {
@@ -362,8 +436,14 @@ if (AdminLayout.init('orders')) {
       totalAmount: (c.totalAmount || 0) + amount
     });
 
-    Utils.toast('订单创建成功，已通知 ' + staff.name);
-    setTimeout(() => location.href = 'orders.html', 700);
+    // 派单通知（示意）
+    NotifyStorage.push('order_dispatch', staff.name, staff.phone,
+      `【家政管家】您有新订单：${Utils.formatDate(tr.start, 'MM月DD日 HH:mm')} ${addr}（${selType} ${dur}小时），请在APP确认接单。`,
+      order.id);
+
+    Utils.toast('订单创建成功，已通知 ' + staff.name +
+      (deduct > 0 ? '，储值抵扣 ' + Utils.formatMoney(deduct) : ''));
+    setTimeout(() => location.href = 'orders.html', 800);
   };
 
   recommend();
