@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>阿姨管理 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .staff-cell { display: flex; align-items: center; gap: 10px; }
+  .staff-cell-avatar { font-size: 24px; }
+  .load-mini { width: 74px; }
+  .load-mini-bar { height: 5px; border-radius: 3px; background: #f1f5f9; overflow: hidden; }
+  .load-mini-fill { height: 100%; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">阿姨管理</span>
+      <span class="topbar-sub" id="sumLabel"></span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" onclick="exportCsv()">📥 导出</button>
+      <button class="btn btn-primary" onclick="openAdd()">+ 新增阿姨</button>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="kpi-row" id="kpiRow"></div>
+
+    <div class="toolbar">
+      <div class="seg" id="statusSeg"></div>
+      <div class="toolbar-spacer"></div>
+      <div class="search">
+        <span class="search-icon">🔍</span>
+        <input id="kw" placeholder="搜索姓名 / 手机号" oninput="render()">
+      </div>
+      <select class="select" id="skillSel" style="width:135px" onchange="render()">
+        <option value="">全部技能</option>
+      </select>
+      <select class="select" id="areaSel" style="width:135px" onchange="render()">
+        <option value="">全部区域</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="card-body tight">
+        <div class="table-wrap" id="tableBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalHost"></div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('staff')) {
+
+  const SKILLS = ['日常保洁', '深度保洁', '擦玻璃', '做饭', '带娃', '月嫂', '育儿嫂', '收纳整理', '家电清洗'];
+  const AREAS = ['朝阳区', '海淀区', '西城区', '东城区', '丰台区', '通州区', '昌平区', '大兴区', '石景山区'];
+  const AVATARS = ['👩', '👩‍🦱', '👩‍🍳', '👩‍💼', '👵', '👩‍🔧', '👩‍⚕️', '🧕'];
+
+  let status = Utils.getParam('status') || 'all';
+
+  document.getElementById('skillSel').innerHTML += SKILLS.map(s => `<option>${s}</option>`).join('');
+  document.getElementById('areaSel').innerHTML += AREAS.map(a => `<option>${a}</option>`).join('');
+
+  function renderKpi() {
+    const all = StaffStorage.getAll();
+    const orders = OrderStorage.getAll();
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    const monthDone = orders.filter(o => o.status === 4 && new Date(o.startTime) >= monthStart);
+    const avgRating = all.length ? (all.reduce((s, x) => s + x.rating, 0) / all.length).toFixed(2) : '0';
+
+    document.getElementById('sumLabel').textContent = `共 ${all.length} 人`;
+    document.getElementById('kpiRow').innerHTML = [
+      { label: '在岗阿姨', value: all.filter(s => s.status === 1).length, foot: `请假 ${all.filter(s => s.status === 2).length} 人 · 离职 ${all.filter(s => s.status === 3).length} 人`, icon: '👩', bg: '#eff6ff' },
+      { label: '本月完成订单', value: monthDone.length, foot: `人均 ${all.length ? (monthDone.length / all.filter(s => s.status === 1).length).toFixed(1) : 0} 单`, icon: '📋', bg: '#f0fdf4' },
+      { label: '平均评分', value: '⭐ ' + avgRating, foot: '基于客户评价', icon: '⭐', bg: '#fef3c7' },
+      { label: '技能覆盖', value: [...new Set(all.flatMap(s => s.skills))].length + ' 项', foot: SKILLS.length + ' 项服务类型', icon: '🛠️', bg: '#fce7f3' }
+    ].map(k => `
+      <div class="kpi">
+        <div class="kpi-top"><span class="kpi-label">${k.label}</span><span class="kpi-badge" style="background:${k.bg}">${k.icon}</span></div>
+        <div class="kpi-value">${k.value}</div>
+        <div class="kpi-foot">${k.foot}</div>
+      </div>`).join('');
+  }
+
+  function renderSeg() {
+    const all = StaffStorage.getAll();
+    const items = [
+      { key: 'all', name: '全部', cnt: all.length },
+      { key: '1', name: '在岗', cnt: all.filter(s => s.status === 1).length },
+      { key: '2', name: '请假', cnt: all.filter(s => s.status === 2).length },
+      { key: '3', name: '离职', cnt: all.filter(s => s.status === 3).length }
+    ];
+    document.getElementById('statusSeg').innerHTML = items.map(i =>
+      `<button class="${i.key === status ? 'on' : ''}" onclick="setStatus('${i.key}')">${i.name} ${i.cnt}</button>`).join('');
+  }
+
+  window.setStatus = function (k) { status = k; renderSeg(); render(); };
+
+  function getFiltered() {
+    const kw = document.getElementById('kw').value.trim().toLowerCase();
+    const skill = document.getElementById('skillSel').value;
+    const area = document.getElementById('areaSel').value;
+    return StaffStorage.getAll()
+      .filter(s => status === 'all' || s.status === Number(status))
+      .filter(s => !kw || s.name.toLowerCase().includes(kw) || s.phone.includes(kw))
+      .filter(s => !skill || s.skills.includes(skill))
+      .filter(s => !area || s.serviceAreas.includes(area));
+  }
+
+  window.render = function () {
+    const list = getFiltered();
+    const orders = OrderStorage.getAll();
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    const weekStart = Utils.getMonday(new Date());
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 7);
+
+    document.getElementById('tableBox').innerHTML = list.length === 0
+      ? '<div class="table-empty"><div class="table-empty-icon">👩</div>没有符合条件的阿姨</div>'
+      : `<table class="data">
+          <thead><tr>
+            <th style="width:170px">阿姨</th>
+            <th style="width:118px">手机号</th>
+            <th>技能</th>
+            <th style="width:145px">服务区域</th>
+            <th style="width:112px">工资方式</th>
+            <th style="width:96px">本月完成</th>
+            <th style="width:110px">本周负荷</th>
+            <th style="width:74px">评分</th>
+            <th style="width:82px">状态</th>
+            <th style="width:120px"></th>
+          </tr></thead>
+          <tbody>${list.map(s => {
+            const monthDone = orders.filter(o => o.staffId === s.id && o.status === 4 && new Date(o.startTime) >= monthStart).length;
+            const weekOrders = orders.filter(o => o.staffId === s.id && o.status !== 0 &&
+              new Date(o.startTime) >= weekStart && new Date(o.startTime) < weekEnd);
+            const weekHours = weekOrders.reduce((a, o) => a + (o.duration || 0), 0);
+            const pct = Math.min(weekHours / 40 * 100, 100);
+            const color = pct > 85 ? 'var(--danger)' : pct > 55 ? 'var(--warning)' : 'var(--success)';
+            const dotCls = s.status === 1 ? 'dot-on' : s.status === 2 ? 'dot-leave' : 'dot-off';
+            const stName = s.status === 1 ? '在岗' : s.status === 2 ? '请假中' : '已离职';
+            return `<tr>
+              <td class="clickable" onclick="location.href='staff-detail.html?id=${s.id}'">
+                <div class="staff-cell">
+                  <span class="staff-cell-avatar">${s.avatar}</span>
+                  <div><div class="td-strong">${s.name}</div>
+                  <div class="td-muted">入职 ${s.entryDate || '-'}</div></div>
+                </div></td>
+              <td class="td-muted">${s.phone}</td>
+              <td>${s.skills.slice(0, 3).map(k => `<span class="tag tag-skill">${k}</span>`).join(' ')}${s.skills.length > 3 ? ` <span class="td-muted">+${s.skills.length - 3}</span>` : ''}</td>
+              <td>${s.serviceAreas.map(a => `<span class="tag tag-area">${a}</span>`).join(' ')}</td>
+              <td class="td-muted">${Utils.getSalaryTypeName(s.salaryType)}</td>
+              <td class="td-strong">${monthDone} 单</td>
+              <td><div class="load-mini">
+                <div class="td-muted" style="margin-bottom:2px">${weekOrders.length} 单 / ${weekHours}h</div>
+                <div class="load-mini-bar"><div class="load-mini-fill" style="width:${pct}%;background:${color}"></div></div>
+              </div></td>
+              <td>⭐ ${s.rating}</td>
+              <td><span class="dot ${dotCls}"></span>${stName}</td>
+              <td class="td-actions">
+                <button class="btn btn-ghost btn-sm" onclick="location.href='order-create.html?staffId=${s.id}'">派单</button>
+                <button class="btn btn-ghost btn-sm" onclick="toggleStatus('${s.id}')">${s.status === 1 ? '停用' : '启用'}</button>
+              </td>
+            </tr>`;
+          }).join('')}
+          </tbody></table>`;
+  };
+
+  window.toggleStatus = function (id) {
+    const s = StaffStorage.getById(id);
+    const next = s.status === 1 ? 2 : 1;
+    StaffStorage.update(id, { status: next });
+    Utils.toast(next === 1 ? s.name + ' 已恢复在岗' : s.name + ' 已设为请假');
+    renderKpi(); renderSeg(); render();
+  };
+
+  // ===== 新增阿姨 =====
+  window.openAdd = function () {
+    document.getElementById('modalHost').innerHTML = `
+      <div class="mask" onclick="if(event.target===this)closeModal()">
+        <div class="modal wide">
+          <div class="modal-head">
+            <span class="modal-title">新增阿姨</span>
+            <button class="modal-x" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">姓名 <span class="req">*</span></label>
+                <input class="input" id="aName" placeholder="如：张阿姨">
+              </div>
+              <div class="field">
+                <label class="field-label">手机号 <span class="req">*</span></label>
+                <input class="input" id="aPhone" type="tel" maxlength="11" placeholder="登录阿姨端用">
+              </div>
+              <div class="field">
+                <label class="field-label">入职日期</label>
+                <input class="input" id="aEntry" type="date" value="${Utils.formatDate(new Date().toISOString())}">
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="field-label">技能标签 <span class="req">*</span></label>
+              <div class="chip-group" id="aSkills">
+                ${SKILLS.map(s => `<div class="chip" data-v="${s}" onclick="this.classList.toggle('on')">${s}</div>`).join('')}
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="field-label">服务区域 <span class="req">*</span></label>
+              <div class="chip-group" id="aAreas">
+                ${AREAS.map(a => `<div class="chip" data-v="${a}" onclick="this.classList.toggle('on')">${a}</div>`).join('')}
+              </div>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">工资方式 <span class="req">*</span></label>
+                <select class="select" id="aSalType" onchange="salFields()">
+                  <option value="1">按单结算</option>
+                  <option value="2">按小时结算</option>
+                  <option value="3">底薪 + 提成</option>
+                  <option value="4">包月固定</option>
+                </select>
+              </div>
+              <div id="aSalFields" style="display:contents"></div>
+            </div>
+
+            <div class="field" style="margin-bottom:0">
+              <label class="field-label">备注</label>
+              <input class="input" id="aRemark" placeholder="如：持有高级月嫂证、通勤方便">
+            </div>
+            <div class="field-hint" style="margin-top:10px">初始登录密码为 123456，阿姨可在手机端使用手机号登录</div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+            <button class="btn btn-primary" onclick="doAdd()">确认新增</button>
+          </div>
+        </div>
+      </div>`;
+    salFields();
+  };
+
+  window.salFields = function () {
+    const t = document.getElementById('aSalType').value;
+    const box = document.getElementById('aSalFields');
+    if (t === '1') box.innerHTML = `<div class="field"><label class="field-label">每单价格（元）</label><input class="input" id="sv1" type="number" value="80"></div>`;
+    else if (t === '2') box.innerHTML = `<div class="field"><label class="field-label">时薪（元/小时）</label><input class="input" id="sv1" type="number" value="45"></div>`;
+    else if (t === '3') box.innerHTML = `<div class="field"><label class="field-label">月底薪（元）</label><input class="input" id="sv1" type="number" value="3000"></div>
+      <div class="field"><label class="field-label">提成比例（%）</label><input class="input" id="sv2" type="number" value="15"></div>`;
+    else box.innerHTML = `<div class="field"><label class="field-label">月薪（元）</label><input class="input" id="sv1" type="number" value="5000"></div>`;
+  };
+
+  window.doAdd = function () {
+    const name = document.getElementById('aName').value.trim();
+    const phone = document.getElementById('aPhone').value.trim();
+    const skills = [...document.querySelectorAll('#aSkills .chip.on')].map(c => c.dataset.v);
+    const areas = [...document.querySelectorAll('#aAreas .chip.on')].map(c => c.dataset.v);
+    const salType = Number(document.getElementById('aSalType').value);
+
+    if (!name) return Utils.toast('请填写姓名');
+    if (!Utils.validatePhone(phone)) return Utils.toast('请填写正确的手机号');
+    if (StaffStorage.getByPhone(phone)) return Utils.toast('该手机号已存在');
+    if (!skills.length) return Utils.toast('请至少选择一项技能');
+    if (!areas.length) return Utils.toast('请至少选择一个服务区域');
+
+    const v1 = Number(document.getElementById('sv1').value) || 0;
+    let cfg = {};
+    if (salType === 1) { cfg = { perOrder: {} }; skills.forEach(s => cfg.perOrder[s] = v1); }
+    else if (salType === 2) cfg = { hourlyRate: v1 };
+    else if (salType === 3) cfg = { baseSalary: v1, commissionRate: (Number(document.getElementById('sv2').value) || 15) / 100 };
+    else cfg = { monthlyPay: v1 };
+
+    StaffStorage.add({
+      name, phone, password: '123456',
+      avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)],
+      idCard: '', skills, serviceAreas: areas,
+      salaryType: salType, salaryConfig: cfg, status: 1,
+      entryDate: document.getElementById('aEntry').value,
+      remark: document.getElementById('aRemark').value.trim(),
+      rating: 5.0
+    });
+
+    closeModal();
+    Utils.toast(name + ' 已添加，初始密码 123456');
+    renderKpi(); renderSeg(); render();
+  };
+
+  window.closeModal = function () { document.getElementById('modalHost').innerHTML = ''; };
+
+  window.exportCsv = function () {
+    const list = getFiltered();
+    if (!list.length) { Utils.toast('没有可导出的数据'); return; }
+    let csv = '姓名,手机号,技能,服务区域,工资方式,状态,入职日期,评分,备注\n';
+    list.forEach(s => {
+      csv += [s.name, s.phone, '"' + s.skills.join('、') + '"', '"' + s.serviceAreas.join('、') + '"',
+        Utils.getSalaryTypeName(s.salaryType),
+        s.status === 1 ? '在岗' : s.status === 2 ? '请假' : '离职',
+        s.entryDate || '', s.rating, '"' + (s.remark || '') + '"'].join(',') + '\n';
+    });
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `阿姨名册_${Utils.formatDate(new Date().toISOString())}.csv`;
+    a.click();
+    Utils.toast('已导出 ' + list.length + ' 条');
+  };
+
+  renderKpi();
+  renderSeg();
+  render();
+}
+</script>
+</body>
+</html>

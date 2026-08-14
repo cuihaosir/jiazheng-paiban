@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>系统设置 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 18px; border-bottom: 1px solid var(--divider);
+  }
+  .row:last-child { border-bottom: none; }
+  .row-icon { font-size: 19px; width: 24px; text-align: center; }
+  .row-body { flex: 1; }
+  .row-title { font-size: 14px; font-weight: 500; }
+  .row-desc { font-size: 12.5px; color: var(--text-tertiary); margin-top: 1px; }
+  .row-ctrl { flex-shrink: 0; }
+  .switch { position: relative; width: 42px; height: 23px; cursor: pointer; }
+  .switch input { display: none; }
+  .switch-track {
+    position: absolute; inset: 0; background: #cbd5e1;
+    border-radius: 12px; transition: background .2s;
+  }
+  .switch-dot {
+    position: absolute; top: 2.5px; left: 2.5px;
+    width: 18px; height: 18px; background: #fff; border-radius: 50%;
+    transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  }
+  .switch input:checked + .switch-track { background: var(--primary); }
+  .switch input:checked + .switch-track .switch-dot { transform: translateX(19px); }
+  .danger-zone { border-color: #fecaca; }
+  .danger-zone .card-head { border-bottom-color: #fee2e2; }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div><span class="topbar-title">系统设置</span></div>
+    <div class="topbar-actions">
+      <span class="td-muted">MVP V0.1 · 演示版</span>
+    </div>
+  </header>
+
+  <div class="page" style="max-width:920px">
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><span class="card-title">账户信息</span></div>
+      <div class="card-body tight">
+        <div class="row">
+          <span class="row-icon">👤</span>
+          <div class="row-body">
+            <div class="row-title" id="userName"></div>
+            <div class="row-desc" id="userMeta"></div>
+          </div>
+          <div class="row-ctrl"><button class="btn btn-ghost btn-sm" onclick="Utils.toast('演示版暂不支持修改密码')">修改密码</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><span class="card-title">排班规则</span></div>
+      <div class="card-body tight">
+        <div class="row">
+          <span class="row-icon">🚗</span>
+          <div class="row-body">
+            <div class="row-title">通勤间隔预留</div>
+            <div class="row-desc">同一阿姨两单之间的最短间隔，用于路途通勤</div>
+          </div>
+          <div class="row-ctrl">
+            <select class="select" id="cfgGap" style="width:112px" onchange="saveCfg()">
+              <option value="0">不预留</option>
+              <option value="30" selected>30 分钟</option>
+              <option value="60">1 小时</option>
+              <option value="90">1.5 小时</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <span class="row-icon">⏱️</span>
+          <div class="row-body">
+            <div class="row-title">单日最大工作时长</div>
+            <div class="row-desc">超过此时长派单时给出提醒</div>
+          </div>
+          <div class="row-ctrl">
+            <select class="select" id="cfgMaxHours" style="width:112px" onchange="saveCfg()">
+              <option value="6">6 小时</option>
+              <option value="8" selected>8 小时</option>
+              <option value="10">10 小时</option>
+              <option value="12">12 小时</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <span class="row-icon">🔒</span>
+          <div class="row-body">
+            <div class="row-title">强制冲突拦截</div>
+            <div class="row-desc">开启后，存在排班冲突时无法保存订单（推荐开启）</div>
+          </div>
+          <div class="row-ctrl">
+            <label class="switch"><input type="checkbox" id="cfgBlockConflict" checked onchange="saveCfg()">
+              <span class="switch-track"><span class="switch-dot"></span></span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><span class="card-title">客户运营</span></div>
+      <div class="card-body tight">
+        <div class="row">
+          <span class="row-icon">🔔</span>
+          <div class="row-body">
+            <div class="row-title">复购提醒周期</div>
+            <div class="row-desc">超过此天数未下单的客户，在工作台高亮提醒</div>
+          </div>
+          <div class="row-ctrl">
+            <select class="select" id="cfgRepurchase" style="width:112px" onchange="saveCfg()">
+              <option value="14">14 天</option>
+              <option value="30" selected>30 天</option>
+              <option value="45">45 天</option>
+              <option value="60">60 天</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <span class="row-icon">📱</span>
+          <div class="row-body">
+            <div class="row-title">短信 / 微信通知</div>
+            <div class="row-desc">派单、改期、取消、服务前提醒自动通知阿姨和客户</div>
+          </div>
+          <div class="row-ctrl">
+            <label class="switch"><input type="checkbox" id="cfgNotify" checked onchange="saveCfg()">
+              <span class="switch-track"><span class="switch-dot"></span></span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><span class="card-title">工资规则</span></div>
+      <div class="card-body tight">
+        <div class="row">
+          <span class="row-icon">🏆</span>
+          <div class="row-body">
+            <div class="row-title">全勤奖门槛</div>
+            <div class="row-desc">月完成订单达到此数量，发放 200 元全勤奖</div>
+          </div>
+          <div class="row-ctrl">
+            <select class="select" id="cfgBonusThreshold" style="width:112px" onchange="saveCfg()">
+              <option value="15">15 单</option>
+              <option value="20" selected>20 单</option>
+              <option value="25">25 单</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <span class="row-icon">🎉</span>
+          <div class="row-body">
+            <div class="row-title">节假日工资倍率</div>
+            <div class="row-desc">法定节假日订单的工资计算倍数</div>
+          </div>
+          <div class="row-ctrl">
+            <select class="select" id="cfgHolidayRate" style="width:112px" onchange="saveCfg()">
+              <option value="1">1 倍</option>
+              <option value="2" selected>2 倍</option>
+              <option value="3">3 倍</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><span class="card-title">数据管理</span></div>
+      <div class="card-body tight">
+        <div class="row">
+          <span class="row-icon">📥</span>
+          <div class="row-body">
+            <div class="row-title">导出全部数据</div>
+            <div class="row-desc">导出阿姨、客户、订单、工资的完整 JSON 备份</div>
+          </div>
+          <div class="row-ctrl"><button class="btn btn-ghost btn-sm" onclick="exportAll()">导出备份</button></div>
+        </div>
+        <div class="row">
+          <span class="row-icon">📊</span>
+          <div class="row-body">
+            <div class="row-title">当前数据量</div>
+            <div class="row-desc" id="dataStats"></div>
+          </div>
+        </div>
+        <div class="row">
+          <span class="row-icon">📱</span>
+          <div class="row-body">
+            <div class="row-title">阿姨端入口</div>
+            <div class="row-desc">阿姨在手机上打开此地址查看排班、接单、看工资</div>
+          </div>
+          <div class="row-ctrl"><a class="btn btn-ghost btn-sm" href="../app/index.html" target="_blank">打开阿姨端 ↗</a></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card danger-zone">
+      <div class="card-head"><span class="card-title" style="color:var(--danger)">危险操作</span></div>
+      <div class="card-body tight">
+        <div class="row">
+          <span class="row-icon">🗑️</span>
+          <div class="row-body">
+            <div class="row-title">重置演示数据</div>
+            <div class="row-desc">清空当前所有数据并重新生成演示数据，此操作不可恢复</div>
+          </div>
+          <div class="row-ctrl"><button class="btn btn-danger btn-sm" onclick="resetAll()">重置数据</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('settings')) {
+
+  const CFG_KEY = 'jz_settings';
+  const user = UserStorage.get();
+  const roleNames = { boss: '老板', dispatcher: '调度员', finance: '财务' };
+
+  document.getElementById('userName').textContent = user.name;
+  document.getElementById('userMeta').textContent =
+    `${roleNames[user.role] || '管理员'} · ${user.phone}`;
+
+  // 载入配置
+  let cfg = {};
+  try { cfg = JSON.parse(localStorage.getItem(CFG_KEY) || '{}'); } catch (e) { cfg = {}; }
+  const fields = ['cfgGap', 'cfgMaxHours', 'cfgRepurchase', 'cfgBonusThreshold', 'cfgHolidayRate'];
+  fields.forEach(f => { if (cfg[f] !== undefined) document.getElementById(f).value = cfg[f]; });
+  ['cfgBlockConflict', 'cfgNotify'].forEach(f => {
+    if (cfg[f] !== undefined) document.getElementById(f).checked = cfg[f];
+  });
+
+  window.saveCfg = function () {
+    const out = {};
+    fields.forEach(f => out[f] = document.getElementById(f).value);
+    ['cfgBlockConflict', 'cfgNotify'].forEach(f => out[f] = document.getElementById(f).checked);
+    try { localStorage.setItem(CFG_KEY, JSON.stringify(out)); Utils.toast('设置已保存'); }
+    catch (e) { Utils.toast('保存失败'); }
+  };
+
+  function refreshStats() {
+    document.getElementById('dataStats').textContent =
+      `阿姨 ${StaffStorage.getAll().length} 人 · 客户 ${CustomerStorage.getAll().length} 位 · ` +
+      `订单 ${OrderStorage.getAll().length} 条 · 工资记录 ${SalaryStorage.getAll().length} 条`;
+  }
+  refreshStats();
+
+  window.exportAll = function () {
+    const data = {
+      exportedAt: new Date().toISOString(),
+      staff: StaffStorage.getAll(),
+      customers: CustomerStorage.getAll(),
+      orders: OrderStorage.getAll(),
+      salary: SalaryStorage.getAll(),
+      leaves: LeaveStorage.getAll()
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `家政系统备份_${Utils.formatDate(new Date().toISOString())}.json`;
+    a.click();
+    Utils.toast('备份已导出');
+  };
+
+  window.resetAll = function () {
+    if (!confirm('确定重置所有数据？\n当前的阿姨、客户、订单、工资记录都将被清空并重新生成演示数据。')) return;
+    ['jz_staff', 'jz_customers', 'jz_orders', 'jz_salary', 'jz_leaves'].forEach(k => localStorage.removeItem(k));
+    initAllData();
+    Utils.toast('数据已重置');
+    refreshStats();
+  };
+}
+</script>
+</body>
+</html>

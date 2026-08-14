@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>新建订单 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .sticky-side { position: sticky; top: 78px; }
+  .sum-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 13.5px; border-bottom: 1px solid var(--divider); }
+  .sum-row:last-of-type { border-bottom: none; }
+  .sum-k { color: var(--text-tertiary); }
+  .sum-v { font-weight: 500; text-align: right; max-width: 62%; }
+  .sum-total { display: flex; justify-content: space-between; align-items: baseline; padding-top: 12px; margin-top: 6px; border-top: 1px dashed var(--border); }
+  .sum-total-v { font-size: 24px; font-weight: 700; color: var(--primary); }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">新建订单</span>
+      <span class="topbar-sub">填写服务信息，系统自动推荐空闲阿姨并检测排班冲突</span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" onclick="history.back()">取消</button>
+      <button class="btn btn-primary" onclick="submit()">确认创建订单</button>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="grid-side">
+      <div style="display:flex;flex-direction:column;gap:16px">
+
+        <!-- 客户信息 -->
+        <div class="card">
+          <div class="card-head"><span class="card-title">① 客户信息</span></div>
+          <div class="card-body">
+            <div class="field">
+              <label class="field-label">选择老客户</label>
+              <select class="select" id="custSel" onchange="onCustomer()">
+                <option value="">— 新客户（手动填写下方信息）—</option>
+              </select>
+              <div class="field-hint" id="custHint"></div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">客户姓名 <span class="req">*</span></label>
+                <input class="input" id="custName" placeholder="如：王女士">
+              </div>
+              <div class="field">
+                <label class="field-label">联系电话 <span class="req">*</span></label>
+                <input class="input" id="custPhone" type="tel" maxlength="11" placeholder="11 位手机号">
+              </div>
+            </div>
+            <div class="field" style="margin-bottom:0">
+              <label class="field-label">服务地址 <span class="req">*</span></label>
+              <input class="input" id="custAddr" placeholder="如：朝阳区望京SOHO T1 12层" oninput="recommend()">
+            </div>
+          </div>
+        </div>
+
+        <!-- 服务信息 -->
+        <div class="card">
+          <div class="card-head"><span class="card-title">② 服务信息</span></div>
+          <div class="card-body">
+            <div class="field">
+              <label class="field-label">服务类型 <span class="req">*</span></label>
+              <div class="chip-group" id="typeChips"></div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">服务日期 <span class="req">*</span></label>
+                <input class="input" id="date" type="date" onchange="recommend()">
+              </div>
+              <div class="field">
+                <label class="field-label">开始时间 <span class="req">*</span></label>
+                <input class="input" id="time" type="time" value="09:00" onchange="recommend()">
+              </div>
+              <div class="field">
+                <label class="field-label">服务时长 <span class="req">*</span></label>
+                <select class="select" id="dur" onchange="onDuration()">
+                  <option value="2">2 小时</option>
+                  <option value="3" selected>3 小时</option>
+                  <option value="4">4 小时</option>
+                  <option value="5">5 小时</option>
+                  <option value="6">6 小时</option>
+                  <option value="8">8 小时（全天）</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">订单金额（元）<span class="req">*</span></label>
+                <input class="input" id="amount" type="number" min="0" placeholder="选择服务类型后自动计算">
+              </div>
+              <div class="field">
+                <label class="field-label">订单来源</label>
+                <select class="select" id="source">
+                  <option>电话</option><option>微信</option><option>美团</option>
+                  <option>58同城</option><option>转介绍</option><option>其他</option>
+                </select>
+              </div>
+            </div>
+            <div class="field" style="margin-bottom:0">
+              <label class="field-label">客户备注</label>
+              <textarea class="textarea" id="remark" placeholder="特殊要求，如：家里有猫、需自带工具、对清洁剂过敏"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- 指派阿姨 -->
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">③ 指派阿姨</span>
+            <button class="btn btn-ghost btn-sm" onclick="recommend()">🔄 重新推荐</button>
+          </div>
+          <div class="card-body">
+            <div id="conflictBox"></div>
+            <div id="recBox"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧摘要 -->
+      <div class="sticky-side">
+        <div class="card">
+          <div class="card-head"><span class="card-title">订单摘要</span></div>
+          <div class="card-body">
+            <div id="summary"></div>
+            <button class="btn btn-primary btn-lg" style="width:100%;margin-top:16px" onclick="submit()">确认创建订单</button>
+            <div class="field-hint" style="text-align:center;margin-top:9px">创建后自动通知阿姨确认接单</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('orders')) {
+
+  const PRICE = {
+    '日常保洁': 55, '深度保洁': 100, '擦玻璃': 45, '做饭': 65,
+    '带娃': 60, '月嫂': 130, '育儿嫂': 110, '收纳整理': 130, '家电清洗': 80
+  };
+
+  let selType = '';
+  let selStaffId = '';
+
+  // 服务类型
+  document.getElementById('typeChips').innerHTML = Object.keys(PRICE)
+    .map(t => `<div class="chip" data-type="${t}" onclick="pickType('${t}')">${t}</div>`).join('');
+
+  // 客户下拉
+  document.getElementById('custSel').innerHTML += CustomerStorage.getAll()
+    .map(c => `<option value="${c.id}">${c.name} · ${c.phone}（${c.totalOrders}单）</option>`).join('');
+
+  // 预填参数
+  const pStaff = Utils.getParam('staffId');
+  const pDate = Utils.getParam('date');
+  const pTime = Utils.getParam('time');
+  const pCust = Utils.getParam('customerId');
+  document.getElementById('date').value = pDate || Utils.formatDate(new Date().toISOString());
+  if (pTime) document.getElementById('time').value = pTime;
+  if (pCust) { document.getElementById('custSel').value = pCust; }
+
+  window.pickType = function (t) {
+    selType = t;
+    document.querySelectorAll('.chip[data-type]').forEach(c =>
+      c.classList.toggle('on', c.dataset.type === t));
+    onDuration();
+    recommend();
+  };
+
+  window.onDuration = function () {
+    if (!selType) return;
+    const dur = Number(document.getElementById('dur').value);
+    document.getElementById('amount').value = Math.round(PRICE[selType] * dur);
+    summary();
+  };
+
+  window.onCustomer = function () {
+    const id = document.getElementById('custSel').value;
+    const hint = document.getElementById('custHint');
+    if (!id) { hint.textContent = ''; return; }
+    const c = CustomerStorage.getById(id);
+    if (!c) return;
+    document.getElementById('custName').value = c.name;
+    document.getElementById('custPhone').value = c.phone;
+    document.getElementById('custAddr').value = c.address;
+    const level = c.level === 3 ? 'SVIP' : c.level === 2 ? 'VIP' : '普通';
+    hint.innerHTML = `${level}客户 · 累计 ${c.totalOrders} 单 / ${Utils.formatMoney(c.totalAmount)}`
+      + (c.tags && c.tags.length ? ` · 偏好：${c.tags.join('、')}` : '')
+      + (c.remark ? `<br>备注：${c.remark}` : '');
+    recommend();
+    summary();
+  };
+  if (pCust) onCustomer();
+
+  function timeRange() {
+    const date = document.getElementById('date').value;
+    const time = document.getElementById('time').value;
+    const dur = Number(document.getElementById('dur').value);
+    if (!date || !time) return null;
+    const start = new Date(date + 'T' + time + ':00');
+    const end = new Date(start.getTime() + dur * 3600000);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+
+  window.recommend = function () {
+    const tr = timeRange();
+    const box = document.getElementById('recBox');
+    if (!tr) { box.innerHTML = '<div class="field-hint">请先选择服务日期和时间</div>'; return; }
+
+    const addr = document.getElementById('custAddr').value;
+    const busy = OrderStorage.getAll().filter(o =>
+      o.status !== 0 && Utils.isTimeOverlap(tr.start, tr.end, o.startTime, o.endTime)
+    ).map(o => o.staffId);
+
+    let pool = StaffStorage.getAll().filter(s => s.status === 1);
+    const total = pool.length;
+    pool = pool.filter(s => !busy.includes(s.id));
+
+    const scored = pool.map(s => {
+      let score = 55;
+      const reasons = [];
+      if (selType && s.skills.includes(selType)) { score += 22; reasons.push('技能匹配'); }
+      if (addr && s.serviceAreas.some(a => addr.includes(a))) { score += 13; reasons.push('区域匹配'); }
+      if (s.rating >= 4.8) { score += 10; reasons.push('高评分'); }
+      const load = OrderStorage.getByStaff(s.id).filter(o =>
+        o.status !== 0 && new Date(o.startTime) >= new Date(tr.start.slice(0, 10))).length;
+      if (load <= 2) { score += 5; reasons.push('近期空闲'); }
+      return { ...s, score: Math.min(score, 99), reasons };
+    }).sort((a, b) => b.score - a.score);
+
+    const filtered = selType ? scored.filter(s => s.skills.includes(selType)) : scored;
+    const show = filtered.length ? filtered : scored;
+
+    if (!show.length) {
+      box.innerHTML = `<div class="alert alert-err"><span>⚠️</span><div>该时间段 ${total} 位在岗阿姨全部有排班，请调整服务时间。</div></div>`;
+      selStaffId = '';
+      summary();
+      return;
+    }
+
+    let head = `<div class="field-hint" style="margin-bottom:10px">该时段共 ${show.length} 位阿姨空闲`;
+    if (selType && filtered.length === 0) head += `，但均不具备「${selType}」技能，以下按综合匹配度排序`;
+    else if (selType) head += `且具备「${selType}」技能`;
+    head += '，按匹配度排序</div>';
+
+    box.innerHTML = head + show.map(s => `
+      <div class="rec ${s.id === selStaffId ? 'on' : ''}" data-id="${s.id}" onclick="pickStaff('${s.id}')">
+        <span class="rec-avatar">${s.avatar}</span>
+        <div class="rec-body">
+          <div class="rec-name">${s.name} <span class="td-muted">⭐ ${s.rating}</span></div>
+          <div class="rec-meta">${s.skills.slice(0, 3).join(' · ')} ｜ ${s.serviceAreas.join('、')}</div>
+          <div class="rec-meta" style="color:var(--success)">${s.reasons.join(' · ') || '时间空闲'}</div>
+        </div>
+        <span class="rec-score">${s.score}%</span>
+      </div>`).join('');
+
+    if (pStaff && show.find(s => s.id === pStaff)) pickStaff(pStaff);
+    else if (!selStaffId || !show.find(s => s.id === selStaffId)) pickStaff(show[0].id);
+  };
+
+  window.pickStaff = function (id) {
+    selStaffId = id;
+    document.querySelectorAll('.rec').forEach(el =>
+      el.classList.toggle('on', el.dataset.id === id));
+    checkConflict();
+    summary();
+  };
+
+  function checkConflict() {
+    const tr = timeRange();
+    const box = document.getElementById('conflictBox');
+    if (!tr || !selStaffId) { box.innerHTML = ''; return true; }
+
+    const hits = OrderStorage.checkConflict(selStaffId, tr.start, tr.end);
+    if (!hits.length) {
+      box.innerHTML = `<div class="alert alert-ok"><span>✅</span><div>该阿姨在此时间段空闲，无排班冲突。</div></div>`;
+      return true;
+    }
+    const staff = StaffStorage.getById(selStaffId);
+    box.innerHTML = `<div class="alert alert-err"><span>⚠️</span><div>
+      <b>排班冲突：${staff.name}</b> 在此时段已有 ${hits.length} 个订单<br>
+      ${hits.map(h => `· ${Utils.formatDate(h.startTime, 'MM-DD HH:mm')}–${Utils.formatDate(h.endTime, 'HH:mm')} ${h.customerName}（${h.serviceType}）`).join('<br>')}
+      <br>请调整时间或更换阿姨。</div></div>`;
+    return false;
+  }
+
+  function summary() {
+    const tr = timeRange();
+    const staff = selStaffId ? StaffStorage.getById(selStaffId) : null;
+    const amount = Number(document.getElementById('amount').value) || 0;
+    const dur = document.getElementById('dur').value;
+    const name = document.getElementById('custName').value.trim();
+
+    document.getElementById('summary').innerHTML = `
+      <div class="sum-row"><span class="sum-k">客户</span><span class="sum-v">${name || '<span class="td-muted">未填写</span>'}</span></div>
+      <div class="sum-row"><span class="sum-k">服务类型</span><span class="sum-v">${selType || '<span class="td-muted">未选择</span>'}</span></div>
+      <div class="sum-row"><span class="sum-k">服务时间</span><span class="sum-v">${tr
+        ? Utils.formatDate(tr.start, 'MM-DD') + ' ' + Utils.formatDate(tr.start, 'HH:mm') + '–' + Utils.formatDate(tr.end, 'HH:mm')
+        : '<span class="td-muted">未选择</span>'}</span></div>
+      <div class="sum-row"><span class="sum-k">时长</span><span class="sum-v">${dur} 小时</span></div>
+      <div class="sum-row"><span class="sum-k">指派阿姨</span><span class="sum-v">${staff ? staff.avatar + ' ' + staff.name : '<span class="td-muted">未指派</span>'}</span></div>
+      <div class="sum-total"><span class="sum-k">订单金额</span><span class="sum-total-v">${Utils.formatMoney(amount)}</span></div>`;
+  }
+
+  ['custName', 'custPhone', 'amount'].forEach(id =>
+    document.getElementById(id).addEventListener('input', summary));
+
+  window.submit = function () {
+    const name = document.getElementById('custName').value.trim();
+    const phone = document.getElementById('custPhone').value.trim();
+    const addr = document.getElementById('custAddr').value.trim();
+    const amount = Number(document.getElementById('amount').value);
+    const dur = Number(document.getElementById('dur').value);
+    const tr = timeRange();
+
+    if (!name) return Utils.toast('请填写客户姓名');
+    if (!Utils.validatePhone(phone)) return Utils.toast('请填写正确的手机号');
+    if (!addr) return Utils.toast('请填写服务地址');
+    if (!selType) return Utils.toast('请选择服务类型');
+    if (!tr) return Utils.toast('请选择服务日期和时间');
+    if (!selStaffId) return Utils.toast('请指派阿姨');
+    if (!amount || amount <= 0) return Utils.toast('请填写订单金额');
+    if (!checkConflict()) return Utils.toast('存在排班冲突，无法创建');
+
+    let custId = document.getElementById('custSel').value;
+    if (!custId) {
+      const exist = CustomerStorage.getByPhone(phone);
+      if (exist) custId = exist.id;
+      else custId = CustomerStorage.add({
+        name, phone, address: addr,
+        source: document.getElementById('source').value,
+        level: 1, tags: [], lastServiceDate: '', totalOrders: 0, totalAmount: 0, remark: ''
+      }).id;
+    }
+
+    const staff = StaffStorage.getById(selStaffId);
+    OrderStorage.add({
+      customerId: custId, customerName: name, customerPhone: phone,
+      staffId: selStaffId, staffName: staff.name,
+      serviceType: selType,
+      startTime: tr.start, endTime: tr.end, duration: dur,
+      address: addr, amount, status: 1,
+      source: document.getElementById('source').value,
+      remark: document.getElementById('remark').value.trim(),
+      cancelReason: '', rating: 0
+    });
+
+    const c = CustomerStorage.getById(custId);
+    CustomerStorage.update(custId, {
+      lastServiceDate: Utils.formatDate(tr.start),
+      totalOrders: (c.totalOrders || 0) + 1,
+      totalAmount: (c.totalAmount || 0) + amount
+    });
+
+    Utils.toast('订单创建成功，已通知 ' + staff.name);
+    setTimeout(() => location.href = 'orders.html', 700);
+  };
+
+  recommend();
+  summary();
+}
+</script>
+</body>
+</html>

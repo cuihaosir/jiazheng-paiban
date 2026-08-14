@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#059669">
+<title>首页 - 阿姨工作台</title>
+<link rel="stylesheet" href="styles/app.css">
+<style>
+  .quick { display: flex; padding: 16px 0; }
+  .quick-i { flex: 1; text-align: center; }
+  .quick-i + .quick-i { border-left: 1px solid var(--divider); }
+  .quick-ico { font-size: 27px; }
+  .quick-txt { font-size: 13.5px; margin-top: 3px; color: var(--text-secondary); }
+  .now-badge {
+    display: inline-block; background: #fee2e2; color: #b91c1c;
+    font-size: 12.5px; font-weight: 600; padding: 2px 9px; border-radius: 12px;
+    margin-left: 7px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="hero">
+    <div class="hero-top">
+      <div class="hero-avatar" id="face">👩</div>
+      <div>
+        <div class="hero-name" id="name"></div>
+        <div class="hero-greet" id="greet"></div>
+      </div>
+      <button class="hero-out" onclick="App.logout()">退出</button>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat"><div class="hero-stat-v" id="s1">0</div><div class="hero-stat-k">今日订单</div></div>
+      <div class="hero-stat"><div class="hero-stat-v" id="s2">0</div><div class="hero-stat-k">本月完成</div></div>
+      <div class="hero-stat"><div class="hero-stat-v" id="s3">0</div><div class="hero-stat-k">本月收入</div></div>
+    </div>
+  </div>
+
+  <div class="float">
+    <div class="quick">
+      <a class="quick-i" href="schedule.html"><div class="quick-ico">📅</div><div class="quick-txt">我的排班</div></a>
+      <a class="quick-i" href="salary.html"><div class="quick-ico">💰</div><div class="quick-txt">我的工资</div></a>
+      <a class="quick-i" href="leave.html"><div class="quick-ico">🏖️</div><div class="quick-txt">请假</div></a>
+    </div>
+  </div>
+
+  <div id="pendingBox"></div>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">今天的安排 <span id="todayCnt"></span></span>
+      <a class="card-more" href="schedule.html">全部 ›</a>
+    </div>
+    <div class="card-body" id="todayBox"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">接下来几天</span>
+      <a class="card-more" href="orders.html">全部订单 ›</a>
+    </div>
+    <div class="card-body" id="nextBox"></div>
+  </div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/app.js"></script>
+<script>
+if (App.init('home')) {
+
+  const me = App.me();
+  document.getElementById('face').textContent = me.avatar || '👩';
+  document.getElementById('name').textContent = me.name;
+
+  const h = new Date().getHours();
+  document.getElementById('greet').textContent =
+    h < 6 ? '这么早，注意休息 🌙'
+    : h < 9 ? '早上好，今天加油 🌅'
+    : h < 12 ? '上午好，工作顺利 ☀️'
+    : h < 14 ? '中午好，记得吃饭 🍚'
+    : h < 18 ? '下午好，辛苦了 🌤️'
+    : '晚上好，今天辛苦了 🌙';
+
+  const mine = App.myOrders().filter(o => o.status !== 0);
+
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const t1 = new Date(t0); t1.setDate(t1.getDate() + 1);
+  const monthStart = new Date(t0.getFullYear(), t0.getMonth(), 1);
+
+  const today = mine.filter(o => {
+    const t = new Date(o.startTime);
+    return t >= t0 && t < t1;
+  }).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+  const monthDone = mine.filter(o => o.status === 4 && new Date(o.startTime) >= monthStart);
+  const income = monthDone.reduce((a, o) => a + o.amount, 0);
+
+  document.getElementById('s1').textContent = today.length;
+  document.getElementById('s2').textContent = monthDone.length;
+  document.getElementById('s3').textContent = '¥' + income;
+
+  // 待接单提醒
+  const pending = mine.filter(o => o.status === 1);
+  document.getElementById('pendingBox').innerHTML = pending.length === 0 ? '' : `
+    <div class="notice notice-warn">
+      <span>🔔</span>
+      <div><b>有 ${pending.length} 个新订单等您确认</b><br>
+      确认后调度员才知道您能接，请尽快处理。
+      <div style="margin-top:9px"><a class="btn btn-brand btn-mini" href="orders.html?filter=pending" style="display:inline-flex">去确认</a></div></div>
+    </div>`;
+
+  // 今日安排
+  const nowTs = Date.now();
+  document.getElementById('todayCnt').textContent = today.length ? `（${today.length} 单）` : '';
+  document.getElementById('todayBox').innerHTML = today.length === 0
+    ? '<div class="empty" style="padding:32px 20px"><div class="empty-icon">😊</div><div class="empty-text">今天没有安排<br>好好休息</div></div>'
+    : today.map(o => {
+        const isNow = nowTs >= new Date(o.startTime).getTime() && nowTs <= new Date(o.endTime).getTime();
+        return App.jobCard(o).replace('</span>\n          <span class="tag',
+          (isNow ? '<span class="now-badge">进行中</span>' : '') + '</span>\n          <span class="tag');
+      }).join('');
+
+  // 接下来 7 天
+  const t7 = new Date(t1); t7.setDate(t7.getDate() + 7);
+  const next = mine.filter(o => {
+    const t = new Date(o.startTime);
+    return t >= t1 && t < t7;
+  }).sort((a, b) => new Date(a.startTime) - new Date(b.startTime)).slice(0, 5);
+
+  document.getElementById('nextBox').innerHTML = next.length === 0
+    ? '<div class="empty" style="padding:32px 20px"><div class="empty-icon">📭</div><div class="empty-text">最近几天还没有安排</div></div>'
+    : next.map(o => App.jobCard(o, { showDate: true })).join('');
+}
+</script>
+</body>
+</html>

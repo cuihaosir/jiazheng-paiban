@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#ffffff">
+<title>我的排班 - 阿姨工作台</title>
+<link rel="stylesheet" href="styles/app.css">
+<style>
+  .day-sum {
+    padding: 14px 16px 6px; font-size: 15px; color: var(--text-secondary);
+  }
+  .day-sum b { color: var(--text-primary); }
+  .list { padding: 8px 14px 20px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="nav">
+    <button class="nav-back" onclick="location.href='home.html'">‹</button>
+    <span class="nav-title">我的排班</span>
+    <span class="nav-right"></span>
+  </div>
+
+  <div class="week-bar">
+    <button class="week-arrow" onclick="shift(-1)">‹</button>
+    <span class="week-label" id="weekLabel"></span>
+    <button class="week-arrow" onclick="shift(1)">›</button>
+  </div>
+  <div class="days" id="days"></div>
+
+  <div class="day-sum" id="daySum"></div>
+  <div class="list" id="list"></div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/app.js"></script>
+<script>
+if (App.init('schedule')) {
+
+  let weekStart = Utils.getMonday(new Date());
+  let picked = new Date(); picked.setHours(0, 0, 0, 0);
+
+  window.shift = function (d) {
+    weekStart = new Date(weekStart);
+    weekStart.setDate(weekStart.getDate() + d * 7);
+    picked = new Date(weekStart);
+    render();
+  };
+
+  window.pick = function (iso) {
+    picked = new Date(iso);
+    render();
+  };
+
+  function render() {
+    const mine = App.myOrders().filter(o => o.status !== 0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const wkEnd = new Date(weekStart); wkEnd.setDate(wkEnd.getDate() + 6);
+
+    const isThisWeek = weekStart.getTime() === Utils.getMonday(new Date()).getTime();
+    document.getElementById('weekLabel').textContent = isThisWeek ? '本周'
+      : Utils.formatDate(weekStart.toISOString(), 'MM月DD日') + ' – ' + Utils.formatDate(wkEnd.toISOString(), 'MM月DD日');
+
+    // 日期条
+    const wd = ['日', '一', '二', '三', '四', '五', '六'];
+    let daysHtml = '';
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStart); d.setDate(d.getDate() + i); d.setHours(0, 0, 0, 0);
+      const dEnd = new Date(d); dEnd.setDate(dEnd.getDate() + 1);
+      const has = mine.some(o => new Date(o.startTime) >= d && new Date(o.startTime) < dEnd);
+      const isToday = d.getTime() === today.getTime();
+      const isOn = d.getTime() === picked.getTime();
+      daysHtml += `
+        <div class="day ${isOn ? 'on' : ''} ${isToday && !isOn ? 'today' : ''}" onclick="pick('${d.toISOString()}')">
+          <div class="day-w">周${wd[d.getDay()]}</div>
+          <div class="day-d">${d.getDate()}</div>
+          ${has ? '<div class="day-mark"></div>' : '<div style="height:7px"></div>'}
+        </div>`;
+    }
+    document.getElementById('days').innerHTML = daysHtml;
+
+    // 当天列表
+    const pEnd = new Date(picked); pEnd.setDate(pEnd.getDate() + 1);
+    const jobs = mine.filter(o => new Date(o.startTime) >= picked && new Date(o.startTime) < pEnd)
+      .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+    const hours = jobs.reduce((a, o) => a + (o.duration || 0), 0);
+    const money = jobs.reduce((a, o) => a + o.amount, 0);
+    const isToday = picked.getTime() === today.getTime();
+
+    document.getElementById('daySum').innerHTML = jobs.length === 0 ? ''
+      : `${Utils.formatDate(picked.toISOString(), 'MM月DD日')} ${Utils.getWeekDay(picked.toISOString())}${isToday ? '（今天）' : ''} ·
+         <b>${jobs.length} 单</b> · <b>${hours} 小时</b> · <b>${Utils.formatMoney(money)}</b>`;
+
+    document.getElementById('list').innerHTML = jobs.length === 0
+      ? `<div class="empty"><div class="empty-icon">😊</div><div class="empty-text">
+          ${Utils.formatDate(picked.toISOString(), 'MM月DD日')} 没有安排<br>好好休息</div></div>`
+      : jobs.map(o => App.jobCard(o)).join('');
+  }
+
+  render();
+}
+</script>
+</body>
+</html>

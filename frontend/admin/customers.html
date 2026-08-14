@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>客户管理 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">客户管理</span>
+      <span class="topbar-sub" id="sumLabel"></span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" onclick="exportCsv()">📥 导出</button>
+      <button class="btn btn-primary" onclick="openAdd()">+ 新增客户</button>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="kpi-row" id="kpiRow"></div>
+
+    <div class="toolbar">
+      <div class="seg" id="filterSeg"></div>
+      <div class="toolbar-spacer"></div>
+      <div class="search">
+        <span class="search-icon">🔍</span>
+        <input id="kw" placeholder="搜索姓名 / 手机号 / 地址" oninput="render()">
+      </div>
+      <select class="select" id="sortSel" style="width:140px" onchange="render()">
+        <option value="amount">按消费额排序</option>
+        <option value="orders">按订单数排序</option>
+        <option value="recent">按最近服务排序</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="card-body tight">
+        <div class="table-wrap" id="tableBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalHost"></div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('customers')) {
+
+  let filter = Utils.getParam('filter') || 'all';
+
+  function daysSince(d) {
+    return d ? Utils.daysBetween(d, new Date().toISOString()) : null;
+  }
+
+  function renderKpi() {
+    const all = CustomerStorage.getAll();
+    const vip = all.filter(c => c.level >= 2).length;
+    const repurchase = all.filter(c => { const d = daysSince(c.lastServiceDate); return d !== null && d > 30; }).length;
+    const totalAmount = all.reduce((a, c) => a + (c.totalAmount || 0), 0);
+    const avgAmount = all.length ? Math.round(totalAmount / all.length) : 0;
+
+    document.getElementById('sumLabel').textContent = `共 ${all.length} 位客户`;
+    document.getElementById('kpiRow').innerHTML = [
+      { label: '客户总数', value: all.length, foot: `VIP 及以上 ${vip} 位`, icon: '👥', bg: '#eff6ff' },
+      { label: '累计消费', value: Utils.formatMoney(totalAmount), foot: `人均 ${Utils.formatMoney(avgAmount)}`, icon: '💰', bg: '#f0fdf4' },
+      { label: '待复购客户', value: repurchase, foot: '超过 30 天未下单', icon: '🔔', bg: '#fef3c7' },
+      { label: '复购客户占比', value: (all.length ? Math.round(all.filter(c => c.totalOrders > 1).length / all.length * 100) : 0) + '%', foot: '下单 2 次以上', icon: '🔁', bg: '#fce7f3' }
+    ].map(k => `
+      <div class="kpi">
+        <div class="kpi-top"><span class="kpi-label">${k.label}</span><span class="kpi-badge" style="background:${k.bg}">${k.icon}</span></div>
+        <div class="kpi-value">${k.value}</div>
+        <div class="kpi-foot">${k.foot}</div>
+      </div>`).join('');
+  }
+
+  function renderSeg() {
+    const all = CustomerStorage.getAll();
+    const items = [
+      { key: 'all', name: '全部', cnt: all.length },
+      { key: 'vip', name: 'VIP', cnt: all.filter(c => c.level >= 2).length },
+      { key: 'repurchase', name: '待复购', cnt: all.filter(c => { const d = daysSince(c.lastServiceDate); return d !== null && d > 30; }).length },
+      { key: 'new', name: '新客户', cnt: all.filter(c => (c.totalOrders || 0) <= 1).length }
+    ];
+    document.getElementById('filterSeg').innerHTML = items.map(i =>
+      `<button class="${i.key === filter ? 'on' : ''}" onclick="setFilter('${i.key}')">${i.name} ${i.cnt}</button>`).join('');
+  }
+
+  window.setFilter = function (k) { filter = k; renderSeg(); render(); };
+
+  function getFiltered() {
+    const kw = document.getElementById('kw').value.trim().toLowerCase();
+    const sort = document.getElementById('sortSel').value;
+    let list = CustomerStorage.getAll()
+      .filter(c => !kw || c.name.toLowerCase().includes(kw) || c.phone.includes(kw) || (c.address || '').includes(kw));
+
+    if (filter === 'vip') list = list.filter(c => c.level >= 2);
+    else if (filter === 'repurchase') list = list.filter(c => { const d = daysSince(c.lastServiceDate); return d !== null && d > 30; });
+    else if (filter === 'new') list = list.filter(c => (c.totalOrders || 0) <= 1);
+
+    if (sort === 'amount') list.sort((a, b) => (b.totalAmount || 0) - (a.totalAmount || 0));
+    else if (sort === 'orders') list.sort((a, b) => (b.totalOrders || 0) - (a.totalOrders || 0));
+    else list.sort((a, b) => new Date(b.lastServiceDate || 0) - new Date(a.lastServiceDate || 0));
+
+    return list;
+  }
+
+  window.render = function () {
+    const list = getFiltered();
+    document.getElementById('tableBox').innerHTML = list.length === 0
+      ? '<div class="table-empty"><div class="table-empty-icon">👥</div>没有符合条件的客户</div>'
+      : `<table class="data">
+          <thead><tr>
+            <th style="width:130px">客户</th>
+            <th style="width:112px">手机号</th>
+            <th>服务地址</th>
+            <th>偏好标签</th>
+            <th style="width:76px">来源</th>
+            <th style="width:74px">订单数</th>
+            <th style="width:104px">累计消费</th>
+            <th style="width:118px">上次服务</th>
+            <th style="width:120px"></th>
+          </tr></thead>
+          <tbody>${list.map(c => {
+            const d = daysSince(c.lastServiceDate);
+            const need = d !== null && d > 30;
+            const lvTag = c.level === 3 ? '<span class="tag tag-svip">SVIP</span>'
+                        : c.level === 2 ? '<span class="tag tag-vip">VIP</span>' : '';
+            return `<tr>
+              <td class="clickable" onclick="location.href='customer-detail.html?id=${c.id}'">
+                <div class="td-strong">${c.name} ${lvTag}</div>
+              </td>
+              <td class="td-muted">${c.phone}</td>
+              <td class="td-muted">${(c.address || '').length > 22 ? c.address.slice(0, 22) + '…' : (c.address || '-')}</td>
+              <td>${(c.tags || []).map(t => `<span class="tag tag-soft">${t}</span>`).join(' ') || '<span class="td-muted">-</span>'}</td>
+              <td class="td-muted">${c.source || '-'}</td>
+              <td class="td-strong">${c.totalOrders || 0}</td>
+              <td class="td-money">${Utils.formatMoney(c.totalAmount || 0)}</td>
+              <td>${c.lastServiceDate
+                ? `${c.lastServiceDate}<div class="${need ? '' : 'td-muted'}" style="${need ? 'color:var(--danger)' : ''};font-size:12px">${d} 天前${need ? ' · 待复购' : ''}</div>`
+                : '<span class="td-muted">从未服务</span>'}</td>
+              <td class="td-actions">
+                <button class="btn btn-ghost btn-sm" onclick="location.href='order-create.html?customerId=${c.id}'">下单</button>
+                <button class="btn btn-ghost btn-sm" onclick="location.href='customer-detail.html?id=${c.id}'">档案</button>
+              </td>
+            </tr>`;
+          }).join('')}
+          </tbody></table>`;
+  };
+
+  window.openAdd = function () {
+    document.getElementById('modalHost').innerHTML = `
+      <div class="mask" onclick="if(event.target===this)closeModal()">
+        <div class="modal">
+          <div class="modal-head">
+            <span class="modal-title">新增客户</span>
+            <button class="modal-x" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">姓名 <span class="req">*</span></label>
+                <input class="input" id="cName" placeholder="如：王女士">
+              </div>
+              <div class="field">
+                <label class="field-label">手机号 <span class="req">*</span></label>
+                <input class="input" id="cPhone" type="tel" maxlength="11">
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label">服务地址 <span class="req">*</span></label>
+              <input class="input" id="cAddr" placeholder="详细到门牌号">
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">客户来源</label>
+                <select class="select" id="cSource">
+                  <option>电话</option><option>微信</option><option>美团</option>
+                  <option>58同城</option><option>转介绍</option><option>其他</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label">客户等级</label>
+                <select class="select" id="cLevel">
+                  <option value="1">普通</option><option value="2">VIP</option><option value="3">SVIP</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label">偏好标签</label>
+              <div class="chip-group" id="cTags">
+                ${['定期保洁', '有宠物', '有小孩', '周末服务', '环保清洁剂', '需自带工具', '对气味敏感'].map(t =>
+                  `<div class="chip" data-v="${t}" onclick="this.classList.toggle('on')">${t}</div>`).join('')}
+              </div>
+            </div>
+            <div class="field" style="margin-bottom:0">
+              <label class="field-label">备注</label>
+              <textarea class="textarea" id="cRemark" placeholder="如：家里有一只金毛，需注意宠物毛发"></textarea>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+            <button class="btn btn-primary" onclick="doAdd()">确认新增</button>
+          </div>
+        </div>
+      </div>`;
+  };
+
+  window.doAdd = function () {
+    const name = document.getElementById('cName').value.trim();
+    const phone = document.getElementById('cPhone').value.trim();
+    const addr = document.getElementById('cAddr').value.trim();
+    if (!name) return Utils.toast('请填写客户姓名');
+    if (!Utils.validatePhone(phone)) return Utils.toast('请填写正确的手机号');
+    if (CustomerStorage.getByPhone(phone)) return Utils.toast('该手机号客户已存在');
+    if (!addr) return Utils.toast('请填写服务地址');
+
+    CustomerStorage.add({
+      name, phone, address: addr,
+      source: document.getElementById('cSource').value,
+      level: Number(document.getElementById('cLevel').value),
+      tags: [...document.querySelectorAll('#cTags .chip.on')].map(c => c.dataset.v),
+      lastServiceDate: '', totalOrders: 0, totalAmount: 0,
+      remark: document.getElementById('cRemark').value.trim()
+    });
+
+    closeModal();
+    Utils.toast('客户已添加');
+    renderKpi(); renderSeg(); render();
+  };
+
+  window.closeModal = function () { document.getElementById('modalHost').innerHTML = ''; };
+
+  window.exportCsv = function () {
+    const list = getFiltered();
+    if (!list.length) { Utils.toast('没有可导出的数据'); return; }
+    let csv = '姓名,手机号,地址,来源,等级,偏好标签,订单数,累计消费,上次服务,备注\n';
+    list.forEach(c => {
+      csv += [c.name, c.phone, '"' + (c.address || '') + '"', c.source || '',
+        c.level === 3 ? 'SVIP' : c.level === 2 ? 'VIP' : '普通',
+        '"' + (c.tags || []).join('、') + '"', c.totalOrders || 0, c.totalAmount || 0,
+        c.lastServiceDate || '', '"' + (c.remark || '') + '"'].join(',') + '\n';
+    });
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `客户名单_${Utils.formatDate(new Date().toISOString())}.csv`;
+    a.click();
+    Utils.toast('已导出 ' + list.length + ' 条');
+  };
+
+  renderKpi();
+  renderSeg();
+  render();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#ffffff">
+<title>请假 - 阿姨工作台</title>
+<link rel="stylesheet" href="styles/app.css">
+<style>
+  .type-chips { display: flex; gap: 9px; }
+  .type-chip {
+    flex: 1; text-align: center; padding: 13px 4px;
+    border: 1.5px solid var(--border); border-radius: var(--radius);
+    font-size: 15px; cursor: pointer; color: var(--text-secondary);
+  }
+  .type-chip.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+  .rec {
+    background: #fff; border-radius: var(--radius); padding: 14px 15px;
+    margin-bottom: 11px; box-shadow: var(--shadow-sm);
+    border-left: 5px solid var(--border);
+  }
+  .rec.s1 { border-left-color: #f59e0b; }
+  .rec.s2 { border-left-color: var(--brand); }
+  .rec.s3 { border-left-color: #ef4444; }
+  .rec-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .rec-t { font-size: 16px; font-weight: 600; }
+  .rec-d { font-size: 14.5px; color: var(--text-secondary); }
+  .rec-r { font-size: 14px; color: var(--text-tertiary); margin-top: 4px; }
+  .st1 { color: #b45309; font-weight: 600; font-size: 14px; }
+  .st2 { color: var(--brand-dark); font-weight: 600; font-size: 14px; }
+  .st3 { color: #b91c1c; font-weight: 600; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="app no-tab">
+  <div class="nav">
+    <button class="nav-back" onclick="location.href='home.html'">‹</button>
+    <span class="nav-title">请假申请</span>
+    <span class="nav-right"></span>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="card-title">提交请假</span></div>
+    <div class="card-body pt">
+      <div class="field">
+        <label class="field-label">请假类型</label>
+        <div class="type-chips" id="types"></div>
+      </div>
+      <div class="field-2">
+        <div class="field">
+          <label class="field-label">开始日期</label>
+          <input class="input" id="d1" type="date" onchange="calcDays()">
+        </div>
+        <div class="field">
+          <label class="field-label">结束日期</label>
+          <input class="input" id="d2" type="date" onchange="calcDays()">
+        </div>
+      </div>
+      <div id="dayInfo"></div>
+      <div class="field" style="margin-bottom:0">
+        <label class="field-label">请假原因</label>
+        <textarea class="textarea" id="reason" placeholder="简单说明一下原因，方便调度员安排"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div id="conflictBox"></div>
+
+  <div style="padding:0 14px 16px">
+    <button class="btn btn-grad" onclick="submit()">提交申请</button>
+  </div>
+
+  <div class="sec-title">我的请假记录</div>
+  <div style="padding:0 14px 24px" id="recList"></div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/app.js"></script>
+<script>
+if (App.init()) {
+
+  const me = App.me();
+  const TYPES = ['事假', '病假', '年假', '调休'];
+  let type = '事假';
+
+  document.getElementById('types').innerHTML = TYPES.map(t =>
+    `<div class="type-chip ${t === type ? 'on' : ''}" onclick="pickType('${t}')">${t}</div>`).join('');
+
+  window.pickType = function (t) {
+    type = t;
+    [...document.querySelectorAll('.type-chip')].forEach(c =>
+      c.classList.toggle('on', c.textContent === t));
+  };
+
+  const tmr = new Date(); tmr.setDate(tmr.getDate() + 1);
+  document.getElementById('d1').value = Utils.formatDate(tmr.toISOString());
+  document.getElementById('d2').value = Utils.formatDate(tmr.toISOString());
+
+  window.calcDays = function () {
+    const d1 = document.getElementById('d1').value;
+    const d2 = document.getElementById('d2').value;
+    const box = document.getElementById('dayInfo');
+    const cBox = document.getElementById('conflictBox');
+    if (!d1 || !d2) { box.innerHTML = ''; cBox.innerHTML = ''; return; }
+    if (new Date(d2) < new Date(d1)) {
+      box.innerHTML = '<div style="font-size:14px;color:#dc2626;margin-bottom:16px">结束日期不能早于开始日期</div>';
+      cBox.innerHTML = '';
+      return;
+    }
+    const days = Utils.daysBetween(d1, d2) + 1;
+    box.innerHTML = `<div style="font-size:14.5px;color:var(--text-secondary);margin-bottom:16px">共 <b style="color:var(--brand)">${days} 天</b></div>`;
+
+    // 检查请假期间是否已有排班
+    const s = new Date(d1); s.setHours(0, 0, 0, 0);
+    const e = new Date(d2); e.setHours(23, 59, 59, 999);
+    const hits = App.myOrders().filter(o =>
+      o.status !== 0 && o.status !== 4 &&
+      new Date(o.startTime) >= s && new Date(o.startTime) <= e);
+
+    cBox.innerHTML = hits.length === 0 ? '' : `
+      <div class="notice notice-warn">
+        <span>⚠️</span>
+        <div><b>这段时间您已经有 ${hits.length} 个订单</b><br>
+        ${hits.map(o => `· ${Utils.formatDate(o.startTime, 'MM月DD日 HH:mm')} ${o.customerName}（${o.serviceType}）`).join('<br>')}
+        <br>请假通过后调度员会重新安排，建议先跟公司说一声。</div>
+      </div>`;
+  };
+  calcDays();
+
+  window.submit = function () {
+    const d1 = document.getElementById('d1').value;
+    const d2 = document.getElementById('d2').value;
+    const reason = document.getElementById('reason').value.trim();
+
+    if (!d1 || !d2) return Utils.toast('请选择请假日期');
+    if (new Date(d2) < new Date(d1)) return Utils.toast('结束日期不能早于开始日期');
+    if (!reason) return Utils.toast('请填写请假原因');
+
+    LeaveStorage.add({
+      staffId: me.id, staffName: me.name,
+      type, startDate: d1, endDate: d2, reason, status: 1
+    });
+
+    document.getElementById('reason').value = '';
+    Utils.toast('申请已提交，等待审批');
+    renderList();
+  };
+
+  function renderList() {
+    const list = LeaveStorage.getByStaff(me.id);
+    document.getElementById('recList').innerHTML = list.length === 0
+      ? '<div class="empty" style="padding:34px 20px"><div class="empty-icon">📋</div><div class="empty-text">还没有请假记录</div></div>'
+      : list.map(l => {
+        const days = Utils.daysBetween(l.startDate, l.endDate) + 1;
+        const st = l.status === 1 ? '待审批' : l.status === 2 ? '已通过' : '已拒绝';
+        return `<div class="rec s${l.status}">
+          <div class="rec-h">
+            <span class="rec-t">${l.type} · ${days} 天</span>
+            <span class="st${l.status}">${st}</span>
+          </div>
+          <div class="rec-d">📅 ${l.startDate} 至 ${l.endDate}</div>
+          <div class="rec-r">${l.reason}</div>
+        </div>`;
+      }).join('');
+  }
+
+  renderList();
+}
+</script>
+</body>
+</html>

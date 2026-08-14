@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排班日历 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--text-secondary); }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-swatch { width: 11px; height: 11px; border-radius: 3px; border-left: 3px solid; }
+  .load-bar { height: 4px; border-radius: 2px; background: #f1f5f9; margin-top: 4px; overflow: hidden; }
+  .load-fill { height: 100%; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">排班日历</span>
+      <span class="topbar-sub" id="rangeLabel"></span>
+    </div>
+    <div class="topbar-actions">
+      <div class="seg">
+        <button id="segWeek" class="on" onclick="setView('week')">周视图</button>
+        <button id="segDay" onclick="setView('day')">日视图</button>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="shift(-1)" title="上一页">‹</button>
+      <button class="btn btn-ghost btn-sm" onclick="goToday()">今天</button>
+      <button class="btn btn-ghost btn-sm" onclick="shift(1)" title="下一页">›</button>
+      <button class="btn btn-primary" onclick="openCreate()">+ 派单</button>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="toolbar">
+      <div class="legend">
+        <span style="color:var(--text-tertiary)">服务类型：</span>
+        <span class="legend-item"><span class="legend-swatch blk-clean"></span>保洁</span>
+        <span class="legend-item"><span class="legend-swatch blk-deep"></span>深度保洁</span>
+        <span class="legend-item"><span class="legend-swatch blk-baby"></span>母婴育儿</span>
+        <span class="legend-item"><span class="legend-swatch blk-cook"></span>做饭</span>
+        <span class="legend-item"><span class="legend-swatch blk-other"></span>其他</span>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <select class="select" id="filterArea" style="width:130px" onchange="render()">
+        <option value="">全部区域</option>
+      </select>
+      <select class="select" id="filterSkill" style="width:130px" onchange="render()">
+        <option value="">全部技能</option>
+      </select>
+    </div>
+
+    <div id="viewBox"></div>
+  </div>
+</div>
+
+<div id="modalHost"></div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('schedule')) {
+
+  let view = 'week';
+  let anchor = Utils.getMonday(new Date());
+
+  // 筛选项初始化
+  const allStaff = StaffStorage.getAll();
+  const areas = [...new Set(allStaff.flatMap(s => s.serviceAreas))].sort();
+  const skills = [...new Set(allStaff.flatMap(s => s.skills))].sort();
+  document.getElementById('filterArea').innerHTML +=
+    areas.map(a => `<option value="${a}">${a}</option>`).join('');
+  document.getElementById('filterSkill').innerHTML +=
+    skills.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  window.setView = function (v) {
+    view = v;
+    document.getElementById('segWeek').className = v === 'week' ? 'on' : '';
+    document.getElementById('segDay').className = v === 'day' ? 'on' : '';
+    if (v === 'day') { anchor = new Date(); anchor.setHours(0, 0, 0, 0); }
+    else { anchor = Utils.getMonday(anchor); }
+    render();
+  };
+
+  window.shift = function (dir) {
+    anchor = new Date(anchor);
+    anchor.setDate(anchor.getDate() + dir * (view === 'week' ? 7 : 1));
+    render();
+  };
+
+  window.goToday = function () {
+    anchor = view === 'week' ? Utils.getMonday(new Date()) : (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
+    render();
+  };
+
+  function blkClass(type) {
+    if (type.includes('深度')) return 'blk-deep';
+    if (type.includes('月嫂') || type.includes('育儿') || type.includes('带娃')) return 'blk-baby';
+    if (type.includes('做饭')) return 'blk-cook';
+    if (type.includes('保洁') || type.includes('擦')) return 'blk-clean';
+    return 'blk-other';
+  }
+
+  function filteredStaff() {
+    const area = document.getElementById('filterArea').value;
+    const skill = document.getElementById('filterSkill').value;
+    return StaffStorage.getAll()
+      .filter(s => s.status !== 3)
+      .filter(s => !area || s.serviceAreas.includes(area))
+      .filter(s => !skill || s.skills.includes(skill));
+  }
+
+  window.render = function () {
+    if (view === 'week') renderWeek(); else renderDay();
+  };
+
+  function renderWeek() {
+    const staff = filteredStaff();
+    const weekEnd = new Date(anchor); weekEnd.setDate(weekEnd.getDate() + 7);
+    const orders = OrderStorage.getByDateRange(anchor.toISOString(), weekEnd.toISOString())
+      .filter(o => o.status !== 0);
+
+    const end = new Date(anchor); end.setDate(end.getDate() + 6);
+    document.getElementById('rangeLabel').textContent =
+      Utils.formatDate(anchor.toISOString(), 'YYYY/MM/DD') + ' – ' + Utils.formatDate(end.toISOString(), 'MM/DD');
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(anchor); d.setDate(d.getDate() + i); d.setHours(0, 0, 0, 0);
+      days.push(d);
+    }
+
+    let html = `<div class="sched-wrap"><table class="sched">
+      <thead><tr><th class="col-staff">阿姨（${staff.length}）</th>`;
+    days.forEach(d => {
+      const isToday = d.getTime() === today.getTime();
+      html += `<th class="${isToday ? 'today' : ''}">${Utils.getWeekDay(d.toISOString())} ${Utils.formatDate(d.toISOString(), 'MM/DD')}${isToday ? ' · 今天' : ''}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    if (staff.length === 0) {
+      html += `<tr><td colspan="8"><div class="table-empty"><div class="table-empty-icon">🔍</div>没有符合筛选条件的阿姨</div></td></tr>`;
+    }
+
+    staff.forEach(s => {
+      const myWeek = orders.filter(o => o.staffId === s.id);
+      const hours = myWeek.reduce((sum, o) => sum + (o.duration || 0), 0);
+      const loadPct = Math.min(hours / 40 * 100, 100);
+      const loadColor = loadPct > 85 ? 'var(--danger)' : loadPct > 55 ? 'var(--warning)' : 'var(--success)';
+      const isLeave = s.status === 2;
+
+      html += `<tr><td class="cell-staff">
+        <div class="sched-staff">
+          <span class="sched-staff-avatar">${s.avatar}</span>
+          <div style="flex:1;min-width:0">
+            <div class="sched-staff-name">${s.name} ${isLeave ? '<span class="tag tag-soft" style="font-size:11px">休假</span>' : ''}</div>
+            <div class="sched-staff-meta">${myWeek.length} 单 · ${hours}h</div>
+            <div class="load-bar"><div class="load-fill" style="width:${loadPct}%;background:${loadColor}"></div></div>
+          </div>
+        </div></td>`;
+
+      days.forEach(d => {
+        const dEnd = new Date(d); dEnd.setDate(dEnd.getDate() + 1);
+        const cell = myWeek.filter(o => {
+          const t = new Date(o.startTime);
+          return t >= d && t < dEnd;
+        }).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+        html += '<td>';
+        if (isLeave) {
+          html += `<div class="blk blk-off"><div class="blk-time">休假</div></div>`;
+        } else if (cell.length === 0) {
+          html += `<button class="cell-add" title="派单" onclick="openCreate('${s.id}','${Utils.formatDate(d.toISOString())}')">+</button>`;
+        } else {
+          cell.forEach(o => {
+            html += `<div class="blk ${blkClass(o.serviceType)}" title="${o.serviceType} · ${o.customerName} · ${Utils.formatMoney(o.amount)}" onclick="location.href='order-detail.html?id=${o.id}'">
+              <div class="blk-time">${Utils.formatDate(o.startTime, 'HH:mm')}–${Utils.formatDate(o.endTime, 'HH:mm')}</div>
+              <div class="blk-name">${o.customerName} · ${o.serviceType}</div>
+            </div>`;
+          });
+        }
+        html += '</td>';
+      });
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    document.getElementById('viewBox').innerHTML = html;
+  }
+
+  function renderDay() {
+    const dayStart = new Date(anchor); dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
+    const staff = filteredStaff();
+    const orders = OrderStorage.getByDateRange(dayStart.toISOString(), dayEnd.toISOString())
+      .filter(o => o.status !== 0);
+
+    document.getElementById('rangeLabel').textContent =
+      Utils.formatDate(dayStart.toISOString(), 'YYYY年MM月DD日') + ' ' + Utils.getWeekDay(dayStart.toISOString());
+
+    const hours = [];
+    for (let h = 7; h <= 20; h++) hours.push(h);
+
+    let html = `<div class="sched-wrap"><table class="sched">
+      <thead><tr><th class="col-staff">阿姨</th>`;
+    hours.forEach(h => { html += `<th style="min-width:58px">${String(h).padStart(2, '0')}:00</th>`; });
+    html += '</tr></thead><tbody>';
+
+    if (staff.length === 0) {
+      html += `<tr><td colspan="${hours.length + 1}"><div class="table-empty"><div class="table-empty-icon">🔍</div>没有符合筛选条件的阿姨</div></td></tr>`;
+    }
+
+    staff.forEach(s => {
+      const mine = orders.filter(o => o.staffId === s.id);
+      html += `<tr><td class="cell-staff">
+        <div class="sched-staff">
+          <span class="sched-staff-avatar">${s.avatar}</span>
+          <div>
+            <div class="sched-staff-name">${s.name}</div>
+            <div class="sched-staff-meta">${mine.length} 单</div>
+          </div>
+        </div></td>`;
+
+      hours.forEach(h => {
+        const hit = mine.find(o => {
+          const sh = new Date(o.startTime).getHours();
+          const eh = new Date(o.endTime).getHours();
+          return h >= sh && h < eh;
+        });
+        const isStart = hit && new Date(hit.startTime).getHours() === h;
+
+        html += '<td style="height:64px">';
+        if (s.status === 2) {
+          if (h === 7) html += '<div class="blk blk-off"><div class="blk-time">休假</div></div>';
+        } else if (hit && isStart) {
+          html += `<div class="blk ${blkClass(hit.serviceType)}" style="white-space:nowrap" onclick="location.href='order-detail.html?id=${hit.id}'">
+            <div class="blk-time">${Utils.formatDate(hit.startTime, 'HH:mm')}</div>
+            <div class="blk-name">${hit.customerName}</div>
+          </div>`;
+        } else if (hit) {
+          html += `<div class="blk ${blkClass(hit.serviceType)}" style="opacity:.45"></div>`;
+        } else {
+          html += `<button class="cell-add" style="min-height:52px" onclick="openCreate('${s.id}','${Utils.formatDate(dayStart.toISOString())}','${String(h).padStart(2, '0')}:00')">+</button>`;
+        }
+        html += '</td>';
+      });
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    document.getElementById('viewBox').innerHTML = html;
+  }
+
+  // ===== 派单弹窗 =====
+  window.openCreate = function (staffId, date, time) {
+    const params = new URLSearchParams();
+    if (staffId) params.set('staffId', staffId);
+    if (date) params.set('date', date);
+    if (time) params.set('time', time);
+    location.href = 'order-create.html' + (params.toString() ? '?' + params.toString() : '');
+  };
+
+  render();
+}
+</script>
+</body>
+</html>

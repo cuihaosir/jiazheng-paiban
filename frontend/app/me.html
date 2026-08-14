@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#059669">
+<title>我的 - 阿姨工作台</title>
+<link rel="stylesheet" href="styles/app.css">
+<style>
+  .me-hero {
+    background: linear-gradient(140deg, #059669 0%, #0891b2 100%);
+    color: #fff; padding: 26px 18px 50px; text-align: center;
+  }
+  .me-face { font-size: 60px; }
+  .me-name { font-size: 24px; font-weight: 700; margin-top: 4px; }
+  .me-phone { font-size: 14.5px; opacity: .88; }
+  .me-badge {
+    display: inline-block; margin-top: 10px; padding: 5px 17px;
+    background: rgba(255,255,255,.2); border-radius: 18px; font-size: 14px;
+  }
+  .me-grid { display: flex; text-align: center; padding: 18px 0; }
+  .me-grid-c { flex: 1; }
+  .me-grid-c + .me-grid-c { border-left: 1px solid var(--divider); }
+  .me-grid-v { font-size: 21px; font-weight: 700; color: var(--brand); }
+  .me-grid-k { font-size: 12.5px; color: var(--text-tertiary); margin-top: 1px; }
+
+  .row {
+    display: flex; align-items: center; gap: 13px;
+    padding: 16px; border-bottom: 1px solid var(--divider);
+    cursor: pointer;
+  }
+  .row:last-child { border-bottom: none; }
+  .row:active { background: var(--bg-page); }
+  .row-ico { font-size: 21px; width: 26px; text-align: center; }
+  .row-t { flex: 1; font-size: 16px; }
+  .row-v { font-size: 14.5px; color: var(--text-tertiary); }
+  .row-go { color: var(--text-tertiary); font-size: 19px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; padding: 4px 0 2px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="me-hero">
+    <div class="me-face" id="face">👩</div>
+    <div class="me-name" id="name"></div>
+    <div class="me-phone" id="phone"></div>
+    <div class="me-badge" id="badge"></div>
+  </div>
+
+  <div class="float">
+    <div class="me-grid" id="grid"></div>
+  </div>
+
+  <div class="card" style="margin-top:0">
+    <div class="card-head"><span class="card-title">我的信息</span></div>
+    <div class="card-body pt" id="info"></div>
+  </div>
+
+  <div class="card">
+    <div style="padding:0">
+      <div class="row" onclick="location.href='leave.html'">
+        <span class="row-ico">🏖️</span><span class="row-t">请假申请</span>
+        <span class="row-v" id="leaveCnt"></span><span class="row-go">›</span>
+      </div>
+      <div class="row" onclick="location.href='salary.html'">
+        <span class="row-ico">💰</span><span class="row-t">工资记录</span><span class="row-go">›</span>
+      </div>
+      <div class="row" onclick="location.href='orders.html'">
+        <span class="row-ico">📋</span><span class="row-t">全部订单</span><span class="row-go">›</span>
+      </div>
+      <div class="row" onclick="Utils.toast('请联系公司调度员修改密码')">
+        <span class="row-ico">🔑</span><span class="row-t">修改密码</span><span class="row-go">›</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding:8px 14px 24px">
+    <button class="btn btn-line" style="color:#dc2626" onclick="App.logout()">退出登录</button>
+  </div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/app.js"></script>
+<script>
+if (App.init('me')) {
+
+  const me = App.me();
+  const s = StaffStorage.getById(me.id);
+
+  document.getElementById('face').textContent = s.avatar || '👩';
+  document.getElementById('name').textContent = s.name;
+  document.getElementById('phone').textContent = s.phone;
+  document.getElementById('badge').textContent =
+    `⭐ ${s.rating} · ${s.status === 1 ? '在岗' : s.status === 2 ? '请假中' : '已离职'}`;
+
+  const all = App.myOrders();
+  const done = all.filter(o => o.status === 4);
+  const hours = done.reduce((a, o) => a + (o.duration || 0), 0);
+  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+  const monthDone = done.filter(o => new Date(o.startTime) >= monthStart);
+
+  document.getElementById('grid').innerHTML = `
+    <div class="me-grid-c"><div class="me-grid-v">${done.length}</div><div class="me-grid-k">累计完成</div></div>
+    <div class="me-grid-c"><div class="me-grid-v">${monthDone.length}</div><div class="me-grid-k">本月完成</div></div>
+    <div class="me-grid-c"><div class="me-grid-v">${hours} h</div><div class="me-grid-k">累计时长</div></div>`;
+
+  const cfg = s.salaryConfig || {};
+  let salDesc = '';
+  if (s.salaryType === 1) salDesc = '按单结算';
+  else if (s.salaryType === 2) salDesc = `按小时 ${cfg.hourlyRate} 元/时`;
+  else if (s.salaryType === 3) salDesc = `底薪 ${cfg.baseSalary} 元 + 提成`;
+  else salDesc = `包月 ${cfg.monthlyPay} 元`;
+
+  document.getElementById('info').innerHTML = `
+    <div class="info-row">
+      <span class="info-k">我的技能</span>
+      <span class="info-v"><div class="chips">${s.skills.map(k => `<span class="tag tag-soft">${k}</span>`).join('')}</div></span>
+    </div>
+    <div class="info-row">
+      <span class="info-k">服务区域</span>
+      <span class="info-v"><div class="chips">${s.serviceAreas.map(a => `<span class="tag tag-soft">${a}</span>`).join('')}</div></span>
+    </div>
+    <div class="info-row">
+      <span class="info-k">工资方式</span>
+      <span class="info-v">${salDesc}</span>
+    </div>
+    <div class="info-row">
+      <span class="info-k">入职时间</span>
+      <span class="info-v">${s.entryDate || '-'}</span>
+    </div>`;
+
+  const leaves = LeaveStorage.getByStaff(me.id);
+  const waiting = leaves.filter(l => l.status === 1).length;
+  document.getElementById('leaveCnt').textContent = waiting ? `${waiting} 条待审批` : '';
+}
+</script>
+</body>
+</html>

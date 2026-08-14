@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#059669">
+<title>订单详情 - 阿姨工作台</title>
+<link rel="stylesheet" href="styles/app.css">
+<style>
+  .top {
+    background: linear-gradient(140deg, #059669 0%, #0891b2 100%);
+    color: #fff; padding: 6px 18px 48px;
+  }
+  .top-nav { display: flex; align-items: center; height: 46px; }
+  .top-nav button { background: none; border: none; color: #fff; font-size: 27px; line-height: 1; padding: 0 10px 3px 0; cursor: pointer; }
+  .top-nav span { font-size: 17px; font-weight: 600; }
+  .top-st { font-size: 14px; opacity: .88; }
+  .top-type { font-size: 25px; font-weight: 700; margin: 3px 0 5px; }
+  .top-time { font-size: 16px; opacity: .95; }
+  .top-money { font-size: 15px; opacity: .88; margin-top: 8px; }
+  .top-money b { font-size: 24px; font-weight: 700; }
+
+  .steps { display: flex; padding: 16px; }
+  .step { flex: 1; text-align: center; position: relative; }
+  .step::before {
+    content: ''; position: absolute; top: 13px; left: 0; right: 50%;
+    height: 2px; background: var(--divider);
+  }
+  .step::after {
+    content: ''; position: absolute; top: 13px; left: 50%; right: 0;
+    height: 2px; background: var(--divider);
+  }
+  .step:first-child::before, .step:last-child::after { display: none; }
+  .step.done::before, .step.done::after { background: var(--brand); }
+  .step.cur::before { background: var(--brand); }
+  .step-dot {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: #fff; border: 2px solid var(--divider);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; margin: 0 auto 5px; position: relative; z-index: 2;
+    color: var(--text-tertiary);
+  }
+  .step.done .step-dot { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .step.cur .step-dot { border-color: var(--brand); color: var(--brand); font-weight: 700; }
+  .step-txt { font-size: 12.5px; color: var(--text-tertiary); }
+  .step.done .step-txt, .step.cur .step-txt { color: var(--text-primary); font-weight: 500; }
+
+  .big-call {
+    display: flex; align-items: center; gap: 13px;
+    padding: 15px 16px; background: var(--brand-bg);
+    border-radius: var(--radius); margin-top: 4px;
+  }
+  .big-call-ico { font-size: 26px; }
+  .big-call-b { flex: 1; }
+  .big-call-t { font-size: 15px; font-weight: 600; }
+  .big-call-p { font-size: 19px; font-weight: 700; color: var(--brand-dark); letter-spacing: .5px; }
+
+  .tips { padding: 13px 15px; background: #fffbeb; border-radius: var(--radius); font-size: 14.5px; color: #92400e; line-height: 1.65; }
+  .timer { text-align: center; padding: 4px 0 12px; }
+  .timer-v { font-size: 32px; font-weight: 700; color: var(--brand); letter-spacing: -.5px; }
+  .timer-k { font-size: 13px; color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+<div class="app no-tab" id="app"></div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/app.js"></script>
+<script>
+if (App.init()) {
+
+  const id = Utils.getParam('id');
+  let timerHandle = null;
+
+  function render() {
+    const o = OrderStorage.getById(id);
+    if (!o) {
+      document.getElementById('app').innerHTML =
+        '<div class="nav"><button class="nav-back" onclick="history.back()">‹</button><span class="nav-title">订单详情</span><span class="nav-right"></span></div>' +
+        '<div class="empty"><div class="empty-icon">🔍</div><div class="empty-text">订单不存在</div></div>';
+      return;
+    }
+    if (o.staffId !== App.me().id) {
+      document.getElementById('app').innerHTML =
+        '<div class="nav"><button class="nav-back" onclick="history.back()">‹</button><span class="nav-title">订单详情</span><span class="nav-right"></span></div>' +
+        '<div class="empty"><div class="empty-icon">🔒</div><div class="empty-text">这不是您的订单</div></div>';
+      return;
+    }
+
+    const cust = CustomerStorage.getById(o.customerId);
+    const stepIdx = o.status === 0 ? -1 : o.status === 1 ? 0 : o.status === 2 ? 1 : o.status === 3 ? 2 : 3;
+    const STEPS = ['待接单', '待上门', '服务中', '已完成'];
+
+    // 服务中计时
+    let timerHtml = '';
+    if (o.status === 3) {
+      const elapsed = Math.max(Math.floor((Date.now() - new Date(o.startTime).getTime()) / 60000), 0);
+      const hh = Math.floor(elapsed / 60), mm = elapsed % 60;
+      timerHtml = `<div class="card"><div class="timer">
+        <div class="timer-v">${hh} 小时 ${mm} 分</div>
+        <div class="timer-k">已服务时长（约定 ${o.duration} 小时）</div>
+      </div></div>`;
+    }
+
+    // 操作按钮
+    let actions = '';
+    if (o.status === 1) {
+      actions = `<button class="btn btn-grad" onclick="act(2)">✅ 确认接单</button>
+                 <button class="btn btn-line" onclick="App.call('${o.customerPhone}')">📞 先联系客户</button>`;
+    } else if (o.status === 2) {
+      actions = `<button class="btn btn-brand" onclick="act(3)">📍 我到了，开始服务</button>
+                 <button class="btn btn-line" onclick="App.call('${o.customerPhone}')">📞 联系客户</button>`;
+    } else if (o.status === 3) {
+      actions = `<button class="btn btn-grad" onclick="finish()">🎉 服务完成</button>
+                 <button class="btn btn-line" onclick="App.call('${o.customerPhone}')">📞 联系客户</button>`;
+    } else if (o.status === 4 || o.status === 5) {
+      actions = `<button class="btn btn-line" onclick="location.href='orders.html'">返回订单列表</button>`;
+    } else {
+      actions = `<button class="btn btn-line" onclick="location.href='orders.html'">返回订单列表</button>`;
+    }
+
+    // 提示文案
+    let tip = '';
+    if (o.status === 1) tip = '调度员给您派了这一单，确认后才算接下。如时间有冲突请及时联系公司。';
+    else if (o.status === 2) tip = '请按约定时间上门，到达后点「我到了」开始计时。';
+    else if (o.status === 3) tip = '服务结束后记得点「服务完成」，这样工资才会计入本月。';
+
+    document.getElementById('app').innerHTML = `
+      <div class="top">
+        <div class="top-nav">
+          <button onclick="history.back()">‹</button>
+          <span>订单详情</span>
+        </div>
+        <div class="top-st">${Utils.getOrderStatusName(o.status)}</div>
+        <div class="top-type">${o.serviceType}</div>
+        <div class="top-time">${Utils.formatDate(o.startTime, 'MM月DD日')} ${Utils.getWeekDay(o.startTime)}
+          ${Utils.formatDate(o.startTime, 'HH:mm')}–${Utils.formatDate(o.endTime, 'HH:mm')}</div>
+        <div class="top-money">这一单收入 <b>${Utils.formatMoney(o.amount)}</b></div>
+      </div>
+
+      <div class="float">
+        <div class="steps">
+          ${STEPS.map((s, i) => `
+            <div class="step ${i < stepIdx ? 'done' : i === stepIdx ? 'cur' : ''}">
+              <div class="step-dot">${i < stepIdx ? '✓' : i + 1}</div>
+              <div class="step-txt">${s}</div>
+            </div>`).join('')}
+        </div>
+      </div>
+
+      ${o.status === 0 ? `<div class="notice notice-warn"><span>❌</span><div>
+        <b>这单已取消</b><br>${o.cancelReason || '未填写原因'}</div></div>` : ''}
+
+      ${timerHtml}
+
+      <div class="card">
+        <div class="card-head"><span class="card-title">客户与地址</span></div>
+        <div class="card-body">
+          <div class="big-call" onclick="App.call('${o.customerPhone}')">
+            <span class="big-call-ico">📞</span>
+            <div class="big-call-b">
+              <div class="big-call-t">${o.customerName}</div>
+              <div class="big-call-p">${o.customerPhone}</div>
+            </div>
+            <span style="font-size:14px;color:var(--brand);font-weight:600">拨打</span>
+          </div>
+
+          <div class="info-row" style="border-top:1px solid var(--divider);margin-top:14px">
+            <span class="info-k">地址</span>
+            <span class="info-v">${o.address}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-k">服务时长</span>
+            <span class="info-v">${o.duration} 小时</span>
+          </div>
+          ${o.remark ? `<div class="info-row">
+            <span class="info-k">客户要求</span>
+            <span class="info-v" style="color:#b45309">${o.remark}</span>
+          </div>` : ''}
+          ${cust && cust.tags && cust.tags.length ? `<div class="info-row">
+            <span class="info-k">注意事项</span>
+            <span class="info-v">${cust.tags.map(t => `<span class="tag tag-soft">${t}</span>`).join(' ')}</span>
+          </div>` : ''}
+          ${cust && cust.remark ? `<div class="info-row">
+            <span class="info-k">客户备注</span>
+            <span class="info-v" style="font-weight:400">${cust.remark}</span>
+          </div>` : ''}
+        </div>
+      </div>
+
+      ${tip ? `<div class="notice notice-info"><span>💡</span><div>${tip}</div></div>` : ''}
+
+      <div style="height:${o.status === 0 || o.status >= 4 ? '80' : '140'}px"></div>
+
+      <div class="action-fix">${actions}</div>`;
+
+    // 服务中每分钟刷新计时
+    if (timerHandle) clearInterval(timerHandle);
+    if (o.status === 3) timerHandle = setInterval(render, 60000);
+  }
+
+  window.act = function (status) {
+    OrderStorage.update(id, { status });
+    Utils.toast(status === 2 ? '已确认接单！' : '已开始服务，正在计时');
+    render();
+  };
+
+  window.finish = function () {
+    if (!confirm('确认这一单已经做完了吗？')) return;
+    OrderStorage.update(id, { status: 4 });
+    Utils.toast('🎉 完成了，辛苦啦！工资已计入本月');
+    render();
+  };
+
+  render();
+}
+</script>
+</body>
+</html>

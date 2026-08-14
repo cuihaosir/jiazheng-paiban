@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#059669">
+<title>登录 - 阿姨工作台</title>
+<link rel="stylesheet" href="styles/app.css">
+<style>
+  body { background: linear-gradient(160deg, #059669 0%, #0891b2 100%); }
+  .login { min-height: 100vh; max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; }
+  .login-top { padding: 64px 28px 40px; text-align: center; color: #fff; }
+  .login-logo {
+    width: 84px; height: 84px; border-radius: 24px; background: #fff;
+    margin: 0 auto 18px; display: flex; align-items: center; justify-content: center;
+    font-size: 42px; box-shadow: 0 8px 26px rgba(0,0,0,.16);
+  }
+  .login-title { font-size: 26px; font-weight: 700; }
+  .login-sub { font-size: 15px; opacity: .88; margin-top: 6px; }
+  .login-box {
+    flex: 1; background: #fff;
+    border-radius: 26px 26px 0 0;
+    padding: 30px 24px 34px;
+  }
+  .login-h { font-size: 21px; font-weight: 700; margin-bottom: 22px; }
+  .accts { margin-top: 22px; }
+  .accts-h { font-size: 13.5px; color: var(--text-tertiary); margin-bottom: 9px; }
+  .acct {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 14px; border: 1.5px solid var(--border);
+    border-radius: var(--radius); margin-bottom: 9px; cursor: pointer;
+  }
+  .acct:active { background: var(--brand-bg); border-color: var(--brand); }
+  .acct-face { font-size: 27px; }
+  .acct-b { flex: 1; }
+  .acct-n { font-size: 15.5px; font-weight: 600; }
+  .acct-p { font-size: 13px; color: var(--text-tertiary); }
+  .acct-go { font-size: 13.5px; color: var(--brand); font-weight: 500; }
+  .to-admin {
+    text-align: center; margin-top: 24px; font-size: 14px; color: var(--text-tertiary);
+  }
+  .to-admin a { color: var(--brand); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="login">
+  <div class="login-top">
+    <div class="login-logo">👩</div>
+    <div class="login-title">阿姨工作台</div>
+    <div class="login-sub">查排班 · 接订单 · 看工资</div>
+  </div>
+
+  <div class="login-box">
+    <div class="login-h">手机号登录</div>
+
+    <form id="f" autocomplete="off">
+      <div class="field">
+        <label class="field-label" for="phone">手机号</label>
+        <input class="input" id="phone" type="tel" inputmode="numeric" maxlength="11" placeholder="请输入手机号">
+      </div>
+      <div class="field">
+        <label class="field-label" for="pwd">密码</label>
+        <input class="input" id="pwd" type="password" inputmode="numeric" placeholder="请输入密码">
+      </div>
+      <button class="btn btn-grad" type="submit">登 录</button>
+    </form>
+
+    <div class="accts">
+      <div class="accts-h">演示账号（点一下自动填好）</div>
+      <div id="acctList"></div>
+    </div>
+
+    <div class="to-admin">
+      我是老板 / 调度员？<a href="../admin/index.html">进入管理后台</a>
+    </div>
+  </div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script>
+  initAllData();
+
+  if (UserStorage.isLoggedIn() && UserStorage.getRole() === 'staff') {
+    location.href = 'home.html';
+  }
+
+  document.getElementById('acctList').innerHTML = StaffStorage.getAll()
+    .filter(s => s.status !== 3)
+    .slice(0, 4)
+    .map(s => `
+      <div class="acct" onclick="fill('${s.phone}')">
+        <span class="acct-face">${s.avatar}</span>
+        <div class="acct-b">
+          <div class="acct-n">${s.name}</div>
+          <div class="acct-p">${s.phone} / 123456</div>
+        </div>
+        <span class="acct-go">使用</span>
+      </div>`).join('');
+
+  function fill(phone) {
+    document.getElementById('phone').value = phone;
+    document.getElementById('pwd').value = '123456';
+  }
+
+  document.getElementById('f').addEventListener('submit', e => {
+    e.preventDefault();
+    const phone = document.getElementById('phone').value.trim();
+    const pwd = document.getElementById('pwd').value.trim();
+
+    if (!phone || !pwd) { Utils.toast('请输入手机号和密码'); return; }
+
+    const staff = StaffStorage.getByPhone(phone);
+    if (!staff || staff.password !== pwd) { Utils.toast('手机号或密码不对'); return; }
+    if (staff.status === 3) { Utils.toast('该账号已离职，无法登录'); return; }
+
+    UserStorage.save({
+      id: staff.id, name: staff.name, phone: staff.phone,
+      role: 'staff', avatar: staff.avatar
+    });
+    Utils.toast('登录成功');
+    setTimeout(() => location.href = 'home.html', 400);
+  });
+</script>
+</body>
+</html>

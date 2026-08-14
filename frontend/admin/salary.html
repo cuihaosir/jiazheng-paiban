@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工资结算 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .month-pick { display: flex; align-items: center; gap: 8px; }
+  .month-pick .now { font-size: 15px; font-weight: 600; min-width: 96px; text-align: center; }
+  .sum-strip {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    overflow: hidden; margin-bottom: 16px;
+  }
+  .sum-cell { background: #fff; padding: 15px 18px; }
+  .sum-val { font-size: 22px; font-weight: 700; }
+  .sum-key { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+  tfoot td { padding: 12px 14px; background: #fafbfd; font-weight: 600; border-top: 2px solid var(--border); }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">工资结算</span>
+      <span class="topbar-sub" id="statusLabel"></span>
+    </div>
+    <div class="topbar-actions">
+      <div class="month-pick">
+        <button class="btn btn-ghost btn-sm" onclick="shiftMonth(-1)">‹</button>
+        <span class="now" id="monthLabel"></span>
+        <button class="btn btn-ghost btn-sm" onclick="shiftMonth(1)">›</button>
+      </div>
+      <button class="btn btn-ghost" onclick="recalc()">🔄 重新计算</button>
+      <button class="btn btn-ghost" onclick="exportCsv()">📥 导出工资表</button>
+      <button class="btn btn-primary" onclick="confirmAll()">✓ 批量确认</button>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="alert alert-info">
+      <span>ℹ️</span>
+      <div>工资根据每位阿姨的结算方式（按单 / 按小时 / 底薪+提成 / 包月）与该月「已完成」订单自动计算。
+      满 20 单发全勤奖 200 元，服务满 80 小时发交通补贴 100 元。</div>
+    </div>
+
+    <div class="sum-strip" id="sumStrip"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">工资明细表</span>
+        <span class="td-muted" id="calcTime"></span>
+      </div>
+      <div class="card-body tight">
+        <div class="table-wrap" id="tableBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalHost"></div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('salary')) {
+
+  let month = Utils.getCurrentMonth();
+
+  window.shiftMonth = function (d) {
+    const [y, m] = month.split('-').map(Number);
+    const dt = new Date(y, m - 1 + d, 1);
+    month = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+    render();
+  };
+
+  window.recalc = function () {
+    SalaryStorage.calculateAll(month);
+    Utils.toast('已按最新订单重新计算');
+    render();
+  };
+
+  window.render = function () {
+    document.getElementById('monthLabel').textContent = month.replace('-', ' / ');
+
+    let records = SalaryStorage.getByMonth(month);
+    if (records.length === 0) {
+      records = SalaryStorage.calculateAll(month);
+    }
+    records = records.filter(r => r.orderCount > 0 || r.baseSalary > 0);
+
+    const totalPay = records.reduce((a, r) => a + r.shouldPay, 0);
+    const totalOrders = records.reduce((a, r) => a + r.orderCount, 0);
+    const totalHours = records.reduce((a, r) => a + r.totalHours, 0);
+    const confirmed = records.filter(r => r.status >= 2).length;
+
+    // 营收对比 → 人力成本率
+    const revenue = OrderStorage.getMonthCompleted(month).reduce((a, o) => a + o.amount, 0);
+    const costRate = revenue > 0 ? Math.round(totalPay / revenue * 100) : 0;
+
+    document.getElementById('statusLabel').textContent =
+      records.length ? `${records.length} 人 · ${confirmed} 人已确认` : '暂无数据';
+
+    document.getElementById('sumStrip').innerHTML = `
+      <div class="sum-cell"><div class="sum-val">${records.length}</div><div class="sum-key">结算人数</div></div>
+      <div class="sum-cell"><div class="sum-val" style="color:var(--primary)">${Utils.formatMoney(totalPay)}</div><div class="sum-key">应发工资总额</div></div>
+      <div class="sum-cell"><div class="sum-val">${totalOrders}</div><div class="sum-key">完成订单总数</div></div>
+      <div class="sum-cell"><div class="sum-val">${totalHours} h</div><div class="sum-key">服务总时长</div></div>
+      <div class="sum-cell"><div class="sum-val">${Utils.formatMoney(revenue)}</div><div class="sum-key">当月营收</div></div>
+      <div class="sum-cell"><div class="sum-val" style="color:${costRate > 65 ? 'var(--danger)' : 'var(--success)'}">${costRate}%</div><div class="sum-key">人力成本率</div></div>`;
+
+    const staffMap = {};
+    StaffStorage.getAll().forEach(s => staffMap[s.id] = s);
+
+    document.getElementById('tableBox').innerHTML = records.length === 0
+      ? '<div class="table-empty"><div class="table-empty-icon">💰</div>该月没有已完成订单，暂无工资数据</div>'
+      : `<table class="data">
+          <thead><tr>
+            <th style="width:44px">#</th>
+            <th style="width:140px">阿姨</th>
+            <th style="width:112px">结算方式</th>
+            <th style="width:74px">订单数</th>
+            <th style="width:78px">时长</th>
+            <th style="width:100px">基本工资</th>
+            <th style="width:92px">提成</th>
+            <th style="width:80px">奖金</th>
+            <th style="width:80px">补贴</th>
+            <th style="width:80px">扣款</th>
+            <th style="width:112px">应发工资</th>
+            <th style="width:88px">状态</th>
+            <th style="width:104px"></th>
+          </tr></thead>
+          <tbody>${records.sort((a, b) => b.shouldPay - a.shouldPay).map((r, i) => {
+            const s = staffMap[r.staffId];
+            const stName = r.status === 1 ? '待确认' : r.status === 2 ? '已确认' : '已发放';
+            const stCls = r.status === 1 ? 'tag-pending' : r.status === 2 ? 'tag-confirmed' : 'tag-completed';
+            return `<tr>
+              <td class="td-muted">${i + 1}</td>
+              <td><div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:20px">${s ? s.avatar : '👩'}</span>
+                <span class="td-strong">${r.staffName}</span></div></td>
+              <td class="td-muted">${s ? Utils.getSalaryTypeName(s.salaryType) : '-'}</td>
+              <td>${r.orderCount}</td>
+              <td class="td-muted">${r.totalHours} h</td>
+              <td>${Utils.formatMoney(r.baseSalary)}</td>
+              <td>${r.commission > 0 ? Utils.formatMoney(r.commission) : '<span class="td-muted">-</span>'}</td>
+              <td>${r.bonus > 0 ? '<span style="color:var(--success)">+' + r.bonus + '</span>' : '<span class="td-muted">-</span>'}</td>
+              <td>${r.subsidy > 0 ? '<span style="color:var(--success)">+' + r.subsidy + '</span>' : '<span class="td-muted">-</span>'}</td>
+              <td>${r.deduction > 0 ? '<span style="color:var(--danger)">-' + r.deduction + '</span>' : '<span class="td-muted">-</span>'}</td>
+              <td class="td-money" style="font-size:15px">${Utils.formatMoney(r.shouldPay)}</td>
+              <td><span class="tag ${stCls}">${stName}</span></td>
+              <td class="td-actions">
+                <button class="btn btn-ghost btn-sm" onclick="openDetail('${r.staffId}')">明细</button>
+                ${r.status === 1 ? `<button class="btn btn-ghost btn-sm" onclick="confirmOne('${r.id}')">确认</button>` : ''}
+              </td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+          <tfoot><tr>
+            <td colspan="3">合计</td>
+            <td>${totalOrders}</td>
+            <td>${totalHours} h</td>
+            <td colspan="5"></td>
+            <td></td>
+            <td style="color:var(--primary);font-size:15px">${Utils.formatMoney(totalPay)}</td>
+            <td colspan="2"></td>
+          </tr></tfoot>
+        </table>`;
+  };
+
+  window.confirmOne = function (recId) {
+    const all = SalaryStorage.getAll();
+    const idx = all.findIndex(r => r.id === recId);
+    if (idx >= 0) { all[idx].status = 2; SalaryStorage.save(all); }
+    Utils.toast('已确认');
+    render();
+  };
+
+  window.confirmAll = function () {
+    const records = SalaryStorage.getByMonth(month);
+    if (!records.length) { Utils.toast('暂无工资数据'); return; }
+    if (!confirm(`确认 ${month} 全部 ${records.length} 人的工资？确认后可导出发放。`)) return;
+    const all = SalaryStorage.getAll();
+    all.forEach(r => { if (r.month === month) r.status = 2; });
+    SalaryStorage.save(all);
+    Utils.toast('已全部确认');
+    render();
+  };
+
+  window.openDetail = function (staffId) {
+    const s = StaffStorage.getById(staffId);
+    const rec = SalaryStorage.getByStaff(staffId, month);
+    const [y, m] = month.split('-').map(Number);
+    const start = new Date(y, m - 1, 1), end = new Date(y, m, 1);
+    const orders = OrderStorage.getByStaff(staffId).filter(o =>
+      o.status === 4 && new Date(o.startTime) >= start && new Date(o.startTime) < end)
+      .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+    const cfg = s.salaryConfig || {};
+    document.getElementById('modalHost').innerHTML = `
+      <div class="mask" onclick="if(event.target===this)closeModal()">
+        <div class="modal wide">
+          <div class="modal-head">
+            <span class="modal-title">${s.name} · ${month} 工资明细</span>
+            <button class="modal-x" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="sum-strip" style="margin-bottom:16px">
+              <div class="sum-cell"><div class="sum-val">${rec.orderCount}</div><div class="sum-key">完成订单</div></div>
+              <div class="sum-cell"><div class="sum-val">${rec.totalHours} h</div><div class="sum-key">服务时长</div></div>
+              <div class="sum-cell"><div class="sum-val" style="color:var(--primary)">${Utils.formatMoney(rec.shouldPay)}</div><div class="sum-key">应发工资</div></div>
+            </div>
+
+            <div class="card" style="margin-bottom:14px">
+              <div class="card-head"><span class="card-title">计算过程</span></div>
+              <div class="card-body">
+                <dl class="dl" style="grid-template-columns:110px 1fr">
+                  <dt>结算方式</dt><dd>${Utils.getSalaryTypeName(s.salaryType)}</dd>
+                  <dt>基本工资</dt><dd>${Utils.formatMoney(rec.baseSalary)}
+                    <span class="td-muted">${s.salaryType === 2 ? `（${rec.totalHours}h × ${cfg.hourlyRate} 元/h）`
+                      : s.salaryType === 1 ? '（各单价累加）'
+                      : s.salaryType === 3 ? `（月底薪）` : '（包月）'}</span></dd>
+                  ${rec.commission > 0 ? `<dt>提成</dt><dd>${Utils.formatMoney(rec.commission)} <span class="td-muted">（订单额 × ${((cfg.commissionRate || 0) * 100).toFixed(0)}%）</span></dd>` : ''}
+                  ${rec.bonus > 0 ? `<dt>全勤奖</dt><dd style="color:var(--success)">+${Utils.formatMoney(rec.bonus)} <span class="td-muted">（满 20 单）</span></dd>` : ''}
+                  ${rec.subsidy > 0 ? `<dt>交通补贴</dt><dd style="color:var(--success)">+${Utils.formatMoney(rec.subsidy)} <span class="td-muted">（满 80 小时）</span></dd>` : ''}
+                  ${rec.deduction > 0 ? `<dt>扣款</dt><dd style="color:var(--danger)">-${Utils.formatMoney(rec.deduction)}</dd>` : ''}
+                  <dt style="font-weight:600;color:var(--text-primary)">应发合计</dt>
+                  <dd style="font-weight:700;color:var(--primary);font-size:16px">${Utils.formatMoney(rec.shouldPay)}</dd>
+                </dl>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><span class="card-title">订单逐笔明细（${orders.length} 单）</span></div>
+              <div class="card-body tight">
+                ${orders.length === 0 ? '<div class="table-empty" style="padding:26px">该月无已完成订单</div>'
+                  : `<table class="data"><thead><tr><th>日期</th><th>客户</th><th>服务类型</th><th>时长</th><th>订单额</th><th>计工资</th></tr></thead>
+                     <tbody>${orders.map(o => {
+                       let pay = '-';
+                       if (s.salaryType === 1) pay = Utils.formatMoney((cfg.perOrder || {})[o.serviceType] || 80);
+                       else if (s.salaryType === 2) pay = Utils.formatMoney(o.duration * (cfg.hourlyRate || 0));
+                       else if (s.salaryType === 3) pay = Utils.formatMoney(o.amount * (cfg.commissionRate || 0)) + ' (提成)';
+                       return `<tr>
+                         <td>${Utils.formatDate(o.startTime, 'MM-DD')}</td>
+                         <td>${o.customerName}</td><td>${o.serviceType}</td>
+                         <td class="td-muted">${o.duration} h</td>
+                         <td>${Utils.formatMoney(o.amount)}</td>
+                         <td class="td-money">${pay}</td></tr>`;
+                     }).join('')}</tbody></table>`}
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeModal()">关闭</button>
+            <button class="btn btn-primary" onclick="location.href='staff-detail.html?id=${staffId}'">查看阿姨档案</button>
+          </div>
+        </div>
+      </div>`;
+  };
+
+  window.closeModal = function () { document.getElementById('modalHost').innerHTML = ''; };
+
+  window.exportCsv = function () {
+    const records = SalaryStorage.getByMonth(month);
+    if (!records.length) { Utils.toast('暂无工资数据'); return; }
+    const staffMap = {};
+    StaffStorage.getAll().forEach(s => staffMap[s.id] = s);
+
+    let csv = `${month} 工资表\n`;
+    csv += '序号,姓名,手机号,结算方式,完成订单数,服务时长(h),基本工资,提成,奖金,补贴,扣款,应发工资,实发工资,状态,签字\n';
+    records.sort((a, b) => b.shouldPay - a.shouldPay).forEach((r, i) => {
+      const s = staffMap[r.staffId];
+      csv += [i + 1, r.staffName, s ? s.phone : '', s ? Utils.getSalaryTypeName(s.salaryType) : '',
+        r.orderCount, r.totalHours, r.baseSalary, r.commission, r.bonus, r.subsidy, r.deduction,
+        r.shouldPay, r.actualPay,
+        r.status === 1 ? '待确认' : r.status === 2 ? '已确认' : '已发放', ''].join(',') + '\n';
+    });
+    csv += `,合计,,,${records.reduce((a, r) => a + r.orderCount, 0)},${records.reduce((a, r) => a + r.totalHours, 0)},,,,,,${records.reduce((a, r) => a + r.shouldPay, 0).toFixed(2)}\n`;
+
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `工资表_${month}.csv`;
+    a.click();
+    Utils.toast('工资表已导出');
+  };
+
+  render();
+}
+</script>
+</body>
+</html>

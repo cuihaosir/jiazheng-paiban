@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据统计 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .trend { display: flex; align-items: flex-end; gap: 3px; height: 168px; padding-top: 10px; }
+  .trend-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; }
+  .trend-bar { width: 100%; max-width: 26px; background: var(--primary); border-radius: 4px 4px 0 0; transition: height .6s ease; position: relative; }
+  .trend-bar:hover { background: var(--primary-dark); }
+  .trend-x { font-size: 10px; color: var(--text-tertiary); white-space: nowrap; transform: rotate(-40deg); transform-origin: center; height: 22px; }
+  .trend-v { font-size: 10px; color: var(--text-secondary); font-weight: 600; }
+  .funnel-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--divider); }
+  .funnel-row:last-child { border-bottom: none; }
+  .funnel-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .funnel-name { flex: 1; font-size: 13.5px; }
+  .funnel-cnt { font-size: 16px; font-weight: 600; }
+  .funnel-pct { font-size: 12px; color: var(--text-tertiary); width: 46px; text-align: right; }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">数据统计</span>
+      <span class="topbar-sub" id="periodLabel"></span>
+    </div>
+    <div class="topbar-actions">
+      <div class="seg" id="rangeSeg">
+        <button class="on" onclick="setRange('month')">本月</button>
+        <button onclick="setRange('quarter')">近 3 个月</button>
+        <button onclick="setRange('all')">全部</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="kpi-row" id="kpiRow"></div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><span class="card-title">每日订单趋势（近 30 天）</span></div>
+      <div class="card-body">
+        <div class="trend" id="trendChart"></div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-head"><span class="card-title">服务类型分布</span></div>
+        <div class="card-body"><div class="bars" id="typeBars"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">订单来源渠道</span></div>
+        <div class="card-body"><div class="bars" id="sourceBars"></div></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">阿姨绩效排行</span>
+          <a class="btn btn-ghost btn-sm" href="staff.html">阿姨管理 →</a>
+        </div>
+        <div class="card-body tight">
+          <div class="table-wrap" id="staffRank"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <div class="card-head"><span class="card-title">订单状态漏斗</span></div>
+          <div class="card-body"><div id="funnel"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">客户价值分层</span></div>
+          <div class="card-body"><div class="bars" id="custTier"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('stats')) {
+
+  const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#ef4444', '#84cc16'];
+  let range = 'month';
+
+  window.setRange = function (r) {
+    range = r;
+    [...document.querySelectorAll('#rangeSeg button')].forEach((b, i) =>
+      b.className = ['month', 'quarter', 'all'][i] === r ? 'on' : '');
+    render();
+  };
+
+  function rangeStart() {
+    const now = new Date();
+    if (range === 'month') return new Date(now.getFullYear(), now.getMonth(), 1);
+    if (range === 'quarter') return new Date(now.getFullYear(), now.getMonth() - 2, 1);
+    return new Date(2000, 0, 1);
+  }
+
+  window.render = function () {
+    const start = rangeStart();
+    const all = OrderStorage.getAll();
+    const scoped = all.filter(o => new Date(o.startTime) >= start);
+    const done = scoped.filter(o => o.status === 4);
+    const revenue = done.reduce((a, o) => a + o.amount, 0);
+    const customers = CustomerStorage.getAll();
+
+    document.getElementById('periodLabel').textContent =
+      range === 'month' ? '本月数据' : range === 'quarter' ? '近 3 个月' : '全部历史数据';
+
+    // KPI
+    const cancelled = scoped.filter(o => o.status === 0).length;
+    const avgAmount = done.length ? Math.round(revenue / done.length) : 0;
+    const repeatCust = customers.filter(c => (c.totalOrders || 0) > 1).length;
+    const repeatRate = customers.length ? Math.round(repeatCust / customers.length * 100) : 0;
+
+    document.getElementById('kpiRow').innerHTML = [
+      { label: '营业收入', value: Utils.formatMoney(revenue), foot: `${done.length} 单已完成`, icon: '💰', bg: '#f0fdf4' },
+      { label: '订单总数', value: scoped.length, foot: `取消 ${cancelled} 单 · 取消率 ${scoped.length ? Math.round(cancelled / scoped.length * 100) : 0}%`, icon: '📋', bg: '#eff6ff' },
+      { label: '平均客单价', value: Utils.formatMoney(avgAmount), foot: '已完成订单均值', icon: '🧾', bg: '#fef3c7' },
+      { label: '客户复购率', value: repeatRate + '%', foot: `${repeatCust} / ${customers.length} 位客户复购`, icon: '🔁', bg: '#fce7f3' }
+    ].map(k => `
+      <div class="kpi">
+        <div class="kpi-top"><span class="kpi-label">${k.label}</span><span class="kpi-badge" style="background:${k.bg}">${k.icon}</span></div>
+        <div class="kpi-value">${k.value}</div>
+        <div class="kpi-foot">${k.foot}</div>
+      </div>`).join('');
+
+    // 30 天趋势
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i); d.setHours(0, 0, 0, 0);
+      const e = new Date(d); e.setDate(e.getDate() + 1);
+      const cnt = all.filter(o => o.status !== 0 && new Date(o.startTime) >= d && new Date(o.startTime) < e).length;
+      days.push({ label: Utils.formatDate(d.toISOString(), 'MM/DD'), count: cnt });
+    }
+    const maxDay = Math.max(...days.map(d => d.count), 1);
+    document.getElementById('trendChart').innerHTML = days.map(d => `
+      <div class="trend-col" title="${d.label}：${d.count} 单">
+        <span class="trend-v">${d.count || ''}</span>
+        <div class="trend-bar" style="height:${d.count / maxDay * 118}px"></div>
+        <span class="trend-x">${d.label}</span>
+      </div>`).join('');
+
+    // 服务类型
+    const typeMap = {};
+    done.forEach(o => {
+      typeMap[o.serviceType] = typeMap[o.serviceType] || { cnt: 0, rev: 0 };
+      typeMap[o.serviceType].cnt++;
+      typeMap[o.serviceType].rev += o.amount;
+    });
+    const types = Object.entries(typeMap).sort((a, b) => b[1].cnt - a[1].cnt);
+    const maxType = types.length ? types[0][1].cnt : 1;
+    document.getElementById('typeBars').innerHTML = types.length === 0
+      ? '<div class="td-muted" style="text-align:center;padding:20px">暂无数据</div>'
+      : types.map(([t, v], i) => `
+        <div class="bar-row">
+          <div class="bar-label">${t}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.max(v.cnt / maxType * 100, 8)}%;background:${COLORS[i % COLORS.length]}">${v.cnt}</div></div>
+          <div class="bar-val">${Utils.formatMoney(v.rev)}</div>
+        </div>`).join('');
+
+    // 来源渠道
+    const srcMap = {};
+    scoped.forEach(o => { if (o.source) srcMap[o.source] = (srcMap[o.source] || 0) + 1; });
+    const srcs = Object.entries(srcMap).sort((a, b) => b[1] - a[1]);
+    const maxSrc = srcs.length ? srcs[0][1] : 1;
+    document.getElementById('sourceBars').innerHTML = srcs.length === 0
+      ? '<div class="td-muted" style="text-align:center;padding:20px">暂无数据</div>'
+      : srcs.map(([s, c], i) => `
+        <div class="bar-row">
+          <div class="bar-label">${s}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.max(c / maxSrc * 100, 8)}%;background:${COLORS[i % COLORS.length]}">${c}</div></div>
+          <div class="bar-val">${Math.round(c / scoped.length * 100)}%</div>
+        </div>`).join('');
+
+    // 阿姨绩效
+    const staff = StaffStorage.getAll().filter(s => s.status !== 3);
+    const perf = staff.map(s => {
+      const mine = done.filter(o => o.staffId === s.id);
+      return {
+        ...s,
+        cnt: mine.length,
+        rev: mine.reduce((a, o) => a + o.amount, 0),
+        hrs: mine.reduce((a, o) => a + (o.duration || 0), 0)
+      };
+    }).sort((a, b) => b.cnt - a.cnt);
+
+    document.getElementById('staffRank').innerHTML = `
+      <table class="data"><thead><tr>
+        <th style="width:44px">#</th><th>阿姨</th><th style="width:70px">订单</th>
+        <th style="width:74px">时长</th><th style="width:100px">创造营收</th><th style="width:66px">评分</th>
+      </tr></thead><tbody>${perf.map((s, i) => `
+        <tr class="clickable" onclick="location.href='staff-detail.html?id=${s.id}'">
+          <td><span class="rank-no ${i === 0 ? 'top1' : i === 1 ? 'top2' : i === 2 ? 'top3' : ''}">${i + 1}</span></td>
+          <td><div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:19px">${s.avatar}</span><span class="td-strong">${s.name}</span></div></td>
+          <td class="td-strong">${s.cnt}</td>
+          <td class="td-muted">${s.hrs} h</td>
+          <td class="td-money">${Utils.formatMoney(s.rev)}</td>
+          <td>⭐ ${s.rating}</td>
+        </tr>`).join('')}</tbody></table>`;
+
+    // 状态漏斗
+    const funnelData = [
+      { name: '待确认', cnt: scoped.filter(o => o.status === 1).length, color: '#f59e0b' },
+      { name: '已确认', cnt: scoped.filter(o => o.status === 2).length, color: '#3b82f6' },
+      { name: '已上门', cnt: scoped.filter(o => o.status === 3).length, color: '#8b5cf6' },
+      { name: '已完成', cnt: scoped.filter(o => o.status === 4).length, color: '#10b981' },
+      { name: '已取消', cnt: cancelled, color: '#ef4444' }
+    ];
+    document.getElementById('funnel').innerHTML = funnelData.map(f => `
+      <div class="funnel-row">
+        <span class="funnel-dot" style="background:${f.color}"></span>
+        <span class="funnel-name">${f.name}</span>
+        <span class="funnel-cnt">${f.cnt}</span>
+        <span class="funnel-pct">${scoped.length ? Math.round(f.cnt / scoped.length * 100) : 0}%</span>
+      </div>`).join('');
+
+    // 客户分层
+    const tiers = [
+      { name: '高价值', desc: '消费 ≥ 5000', cnt: customers.filter(c => (c.totalAmount || 0) >= 5000).length, color: '#10b981' },
+      { name: '中价值', desc: '1000–5000', cnt: customers.filter(c => (c.totalAmount || 0) >= 1000 && (c.totalAmount || 0) < 5000).length, color: '#2563eb' },
+      { name: '低价值', desc: '< 1000', cnt: customers.filter(c => (c.totalAmount || 0) < 1000).length, color: '#f59e0b' }
+    ];
+    const maxTier = Math.max(...tiers.map(t => t.cnt), 1);
+    document.getElementById('custTier').innerHTML = tiers.map(t => `
+      <div class="bar-row">
+        <div class="bar-label" title="${t.desc}">${t.name}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.max(t.cnt / maxTier * 100, 8)}%;background:${t.color}">${t.cnt} 位</div></div>
+        <div class="bar-val" style="font-size:11px;font-weight:400;color:var(--text-tertiary)">${t.desc}</div>
+      </div>`).join('');
+  };
+
+  render();
+}
+</script>
+</body>
+</html>

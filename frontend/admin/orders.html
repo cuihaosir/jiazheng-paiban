@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>订单管理 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .pager { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-top: 1px solid var(--divider); }
+  .pager-info { font-size: 13px; color: var(--text-tertiary); }
+  .pager-btns { display: flex; gap: 7px; align-items: center; }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">订单管理</span>
+      <span class="topbar-sub" id="totalLabel"></span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" onclick="exportCsv()">📥 导出</button>
+      <a class="btn btn-primary" href="order-create.html">+ 新建订单</a>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="toolbar">
+      <div class="seg" id="statusSeg"></div>
+      <div class="toolbar-spacer"></div>
+      <div class="search">
+        <span class="search-icon">🔍</span>
+        <input id="kw" placeholder="搜索客户 / 阿姨 / 订单号" oninput="render()">
+      </div>
+      <select class="select" id="staffSel" style="width:130px" onchange="render()">
+        <option value="">全部阿姨</option>
+      </select>
+      <input class="input" id="dateFrom" type="date" style="width:145px" onchange="render()">
+      <span style="color:var(--text-tertiary)">–</span>
+      <input class="input" id="dateTo" type="date" style="width:145px" onchange="render()">
+      <button class="btn btn-ghost btn-sm" onclick="resetFilter()">重置</button>
+    </div>
+
+    <div class="card">
+      <div class="card-body tight">
+        <div class="table-wrap" id="tableBox"></div>
+        <div class="pager" id="pager"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('orders')) {
+
+  const PAGE_SIZE = 20;
+  let page = 1;
+  let status = Utils.getParam('status') || 'all';
+
+  const statuses = [
+    { key: 'all', name: '全部' },
+    { key: '1', name: '待确认' },
+    { key: '2', name: '已确认' },
+    { key: '3', name: '已上门' },
+    { key: '4', name: '已完成' },
+    { key: '0', name: '已取消' }
+  ];
+
+  document.getElementById('staffSel').innerHTML += StaffStorage.getAll()
+    .map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+
+  function renderSeg() {
+    const all = OrderStorage.getAll();
+    document.getElementById('statusSeg').innerHTML = statuses.map(s => {
+      const cnt = s.key === 'all' ? all.length : all.filter(o => o.status === Number(s.key)).length;
+      return `<button class="${s.key === status ? 'on' : ''}" onclick="setStatus('${s.key}')">${s.name} ${cnt}</button>`;
+    }).join('');
+  }
+
+  window.setStatus = function (k) { status = k; page = 1; renderSeg(); render(); };
+
+  window.resetFilter = function () {
+    status = 'all'; page = 1;
+    document.getElementById('kw').value = '';
+    document.getElementById('staffSel').value = '';
+    document.getElementById('dateFrom').value = '';
+    document.getElementById('dateTo').value = '';
+    renderSeg(); render();
+  };
+
+  function getFiltered() {
+    const kw = document.getElementById('kw').value.trim().toLowerCase();
+    const staffId = document.getElementById('staffSel').value;
+    const from = document.getElementById('dateFrom').value;
+    const to = document.getElementById('dateTo').value;
+
+    return OrderStorage.getAll()
+      .filter(o => status === 'all' || o.status === Number(status))
+      .filter(o => !staffId || o.staffId === staffId)
+      .filter(o => !kw ||
+        o.customerName.toLowerCase().includes(kw) ||
+        o.staffName.toLowerCase().includes(kw) ||
+        o.orderNo.toLowerCase().includes(kw))
+      .filter(o => !from || o.startTime >= from)
+      .filter(o => !to || o.startTime <= to + 'T23:59:59')
+      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+  }
+
+  window.render = function () {
+    const list = getFiltered();
+    document.getElementById('totalLabel').textContent = `共 ${list.length} 条`;
+
+    const totalPages = Math.max(Math.ceil(list.length / PAGE_SIZE), 1);
+    if (page > totalPages) page = totalPages;
+    const slice = list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+    document.getElementById('tableBox').innerHTML = slice.length === 0
+      ? '<div class="table-empty"><div class="table-empty-icon">📭</div>没有符合条件的订单</div>'
+      : `<table class="data">
+          <thead><tr>
+            <th style="width:150px">订单号</th>
+            <th style="width:158px">服务时间</th>
+            <th>客户</th>
+            <th>服务类型</th>
+            <th>阿姨</th>
+            <th>地址</th>
+            <th style="width:80px">来源</th>
+            <th style="width:90px">金额</th>
+            <th style="width:82px">状态</th>
+            <th style="width:70px"></th>
+          </tr></thead>
+          <tbody>${slice.map(o => `
+            <tr class="clickable" onclick="location.href='order-detail.html?id=${o.id}'">
+              <td class="td-muted">${o.orderNo}</td>
+              <td>${Utils.formatDate(o.startTime, 'MM-DD')} ${Utils.getWeekDay(o.startTime)}
+                  <div class="td-muted">${Utils.formatDate(o.startTime, 'HH:mm')}–${Utils.formatDate(o.endTime, 'HH:mm')}</div></td>
+              <td>${o.customerName}<div class="td-muted">${o.customerPhone}</div></td>
+              <td>${o.serviceType}<div class="td-muted">${o.duration} 小时</div></td>
+              <td>${o.staffName}</td>
+              <td class="td-muted">${o.address.length > 16 ? o.address.slice(0, 16) + '…' : o.address}</td>
+              <td class="td-muted">${o.source || '-'}</td>
+              <td class="td-money">${Utils.formatMoney(o.amount)}</td>
+              <td><span class="tag tag-${Utils.getOrderStatusClass(o.status)}">${Utils.getOrderStatusName(o.status)}</span></td>
+              <td class="td-actions"><span class="btn btn-ghost btn-sm">详情</span></td>
+            </tr>`).join('')}
+          </tbody></table>`;
+
+    document.getElementById('pager').innerHTML = `
+      <span class="pager-info">第 ${page} / ${totalPages} 页，共 ${list.length} 条</span>
+      <span class="pager-btns">
+        <button class="btn btn-ghost btn-sm" ${page <= 1 ? 'disabled' : ''} onclick="go(${page - 1})">上一页</button>
+        <button class="btn btn-ghost btn-sm" ${page >= totalPages ? 'disabled' : ''} onclick="go(${page + 1})">下一页</button>
+      </span>`;
+  };
+
+  window.go = function (p) { page = p; render(); };
+
+  window.exportCsv = function () {
+    const list = getFiltered();
+    if (!list.length) { Utils.toast('没有可导出的数据'); return; }
+    let csv = '订单号,服务日期,开始,结束,客户,电话,服务类型,时长,阿姨,地址,金额,来源,状态\n';
+    list.forEach(o => {
+      csv += [
+        o.orderNo, Utils.formatDate(o.startTime, 'YYYY-MM-DD'),
+        Utils.formatDate(o.startTime, 'HH:mm'), Utils.formatDate(o.endTime, 'HH:mm'),
+        o.customerName, o.customerPhone, o.serviceType, o.duration, o.staffName,
+        '"' + o.address + '"', o.amount, o.source || '', Utils.getOrderStatusName(o.status)
+      ].join(',') + '\n';
+    });
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `订单明细_${Utils.formatDate(new Date().toISOString())}.csv`;
+    a.click();
+    Utils.toast('已导出 ' + list.length + ' 条订单');
+  };
+
+  renderSeg();
+  render();
+}
+</script>
+</body>
+</html>

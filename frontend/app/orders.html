@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#ffffff">
+<title>我的订单 - 阿姨工作台</title>
+<link rel="stylesheet" href="styles/app.css">
+<style>
+  .list { padding: 14px; }
+  .group-label {
+    font-size: 14px; color: var(--text-tertiary);
+    padding: 6px 2px 10px; font-weight: 500;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="nav">
+    <button class="nav-back" onclick="location.href='home.html'">‹</button>
+    <span class="nav-title">我的订单</span>
+    <span class="nav-right"></span>
+  </div>
+
+  <div class="filters" id="filters"></div>
+  <div class="list" id="list"></div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/app.js"></script>
+<script>
+if (App.init('orders')) {
+
+  let f = Utils.getParam('filter') || 'all';
+
+  const FILTERS = [
+    { key: 'all', name: '全部' },
+    { key: 'pending', name: '待接单' },
+    { key: 'todo', name: '待服务' },
+    { key: 'done', name: '已完成' },
+    { key: 'cancelled', name: '已取消' }
+  ];
+
+  function counts() {
+    const all = App.myOrders();
+    return {
+      all: all.filter(o => o.status !== 0).length,
+      pending: all.filter(o => o.status === 1).length,
+      todo: all.filter(o => o.status === 2 || o.status === 3).length,
+      done: all.filter(o => o.status === 4 || o.status === 5).length,
+      cancelled: all.filter(o => o.status === 0).length
+    };
+  }
+
+  function renderFilters() {
+    const c = counts();
+    document.getElementById('filters').innerHTML = FILTERS.map(x =>
+      `<button class="filter ${x.key === f ? 'on' : ''}" onclick="setF('${x.key}')">${x.name}${c[x.key] ? ' ' + c[x.key] : ''}</button>`
+    ).join('');
+  }
+
+  window.setF = function (k) { f = k; renderFilters(); render(); };
+
+  function render() {
+    const all = App.myOrders();
+    let list;
+    if (f === 'pending') list = all.filter(o => o.status === 1);
+    else if (f === 'todo') list = all.filter(o => o.status === 2 || o.status === 3);
+    else if (f === 'done') list = all.filter(o => o.status === 4 || o.status === 5);
+    else if (f === 'cancelled') list = all.filter(o => o.status === 0);
+    else list = all.filter(o => o.status !== 0);
+
+    list.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+
+    if (list.length === 0) {
+      document.getElementById('list').innerHTML =
+        '<div class="empty"><div class="empty-icon">📭</div><div class="empty-text">这里还没有订单</div></div>';
+      return;
+    }
+
+    // 按「未来 / 过去」分组
+    const now = Date.now();
+    const future = list.filter(o => new Date(o.startTime).getTime() >= now)
+      .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+    const past = list.filter(o => new Date(o.startTime).getTime() < now);
+
+    let html = '';
+    if (future.length) {
+      html += `<div class="group-label">即将服务（${future.length}）</div>`;
+      html += future.map(o => App.jobCard(o, { showDate: true })).join('');
+    }
+    if (past.length) {
+      html += `<div class="group-label" style="margin-top:${future.length ? '18px' : '0'}">历史记录（${past.length}）</div>`;
+      html += past.slice(0, 30).map(o => App.jobCard(o, { showDate: true })).join('');
+    }
+    document.getElementById('list').innerHTML = html;
+  }
+
+  renderFilters();
+  render();
+}
+</script>
+</body>
+</html>

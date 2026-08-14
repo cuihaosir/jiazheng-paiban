@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>订单详情 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .hero { display: flex; align-items: center; gap: 18px; padding: 20px 22px; }
+  .hero-amount { font-size: 32px; font-weight: 700; color: var(--primary); letter-spacing: -.5px; }
+  .hero-sep { width: 1px; height: 46px; background: var(--border); }
+  .hero-type { font-size: 18px; font-weight: 600; }
+  .hero-meta { font-size: 13px; color: var(--text-tertiary); margin-top: 2px; }
+  .hero-spacer { flex: 1; }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">订单详情</span>
+      <span class="topbar-sub" id="orderNoLabel"></span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" onclick="history.back()">‹ 返回</button>
+      <span id="topActions"></span>
+    </div>
+  </header>
+
+  <div class="page" id="page"></div>
+</div>
+
+<div id="modalHost"></div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('orders')) {
+
+  const id = Utils.getParam('id');
+  let order = OrderStorage.getById(id);
+
+  if (!order) {
+    document.getElementById('page').innerHTML =
+      '<div class="card"><div class="table-empty"><div class="table-empty-icon">🔍</div>订单不存在或已被删除</div></div>';
+  } else {
+    render();
+  }
+
+  function render() {
+    order = OrderStorage.getById(id);
+    const cust = CustomerStorage.getById(order.customerId);
+    const staff = StaffStorage.getById(order.staffId);
+    document.getElementById('orderNoLabel').textContent = order.orderNo;
+
+    // 顶部操作按钮
+    let acts = '';
+    if (order.status === 1) {
+      acts = `<button class="btn btn-success" onclick="setStatus(2)">确认接单</button>
+              <button class="btn btn-ghost" onclick="openReschedule()">改期</button>
+              <button class="btn btn-danger" onclick="openCancel()">取消订单</button>`;
+    } else if (order.status === 2) {
+      acts = `<button class="btn btn-primary" onclick="setStatus(3)">标记已上门</button>
+              <button class="btn btn-ghost" onclick="openReschedule()">改期</button>
+              <button class="btn btn-danger" onclick="openCancel()">取消订单</button>`;
+    } else if (order.status === 3) {
+      acts = `<button class="btn btn-success" onclick="setStatus(4)">标记已完成</button>`;
+    }
+    document.getElementById('topActions').innerHTML = acts;
+
+    // 时间线
+    const tl = [{ t: order.createdAt, text: '订单创建', color: '#94a3b8' }];
+    if (order.status >= 2) tl.push({ t: order.createdAt, text: `${order.staffName} 确认接单`, color: '#3b82f6' });
+    if (order.status >= 3) tl.push({ t: order.startTime, text: '阿姨已上门，开始服务', color: '#8b5cf6' });
+    if (order.status >= 4) tl.push({ t: order.endTime, text: '服务完成', color: '#10b981' });
+    if (order.status === 0) tl.push({ t: order.createdAt, text: '订单已取消：' + (order.cancelReason || '未填写原因'), color: '#ef4444' });
+
+    // 同阿姨当天其他订单
+    const dayStart = order.startTime.slice(0, 10);
+    const sameDay = OrderStorage.getByStaff(order.staffId)
+      .filter(o => o.id !== order.id && o.status !== 0 && o.startTime.slice(0, 10) === dayStart)
+      .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+    document.getElementById('page').innerHTML = `
+      <div class="card" style="margin-bottom:16px">
+        <div class="hero">
+          <div>
+            <div class="hero-amount">${Utils.formatMoney(order.amount)}</div>
+            <div class="hero-meta">订单金额</div>
+          </div>
+          <div class="hero-sep"></div>
+          <div>
+            <div class="hero-type">${order.serviceType}</div>
+            <div class="hero-meta">${Utils.formatDate(order.startTime, 'YYYY-MM-DD')} ${Utils.getWeekDay(order.startTime)}
+              ${Utils.formatDate(order.startTime, 'HH:mm')}–${Utils.formatDate(order.endTime, 'HH:mm')} · ${order.duration} 小时</div>
+          </div>
+          <div class="hero-spacer"></div>
+          <span class="tag tag-${Utils.getOrderStatusClass(order.status)}" style="font-size:14px;padding:6px 16px">
+            ${Utils.getOrderStatusName(order.status)}</span>
+        </div>
+      </div>
+
+      <div class="grid-side">
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card">
+            <div class="card-head"><span class="card-title">订单信息</span></div>
+            <div class="card-body">
+              <dl class="dl">
+                <dt>订单号</dt><dd>${order.orderNo}</dd>
+                <dt>服务类型</dt><dd>${order.serviceType}</dd>
+                <dt>服务时间</dt><dd>${Utils.formatDate(order.startTime, 'YYYY-MM-DD HH:mm')} – ${Utils.formatDate(order.endTime, 'HH:mm')}（${order.duration} 小时）</dd>
+                <dt>服务地址</dt><dd>${order.address}</dd>
+                <dt>订单来源</dt><dd>${order.source || '-'}</dd>
+                <dt>创建时间</dt><dd>${Utils.formatDate(order.createdAt, 'YYYY-MM-DD HH:mm')}</dd>
+                <dt>客户备注</dt><dd>${order.remark || '<span class="td-muted">无</span>'}</dd>
+                ${order.cancelReason ? `<dt>取消原因</dt><dd style="color:var(--danger)">${order.cancelReason}</dd>` : ''}
+              </dl>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-head">
+                <span class="card-title">客户</span>
+                ${cust ? `<a class="btn btn-ghost btn-sm" href="customer-detail.html?id=${cust.id}">客户档案 →</a>` : ''}
+              </div>
+              <div class="card-body">
+                <div style="font-size:16px;font-weight:600">${order.customerName}</div>
+                <div class="td-muted" style="margin-bottom:10px">${order.customerPhone}</div>
+                ${cust ? `<dl class="dl" style="grid-template-columns:80px 1fr">
+                  <dt>等级</dt><dd><span class="tag ${cust.level === 3 ? 'tag-svip' : cust.level === 2 ? 'tag-vip' : 'tag-soft'}">${cust.level === 3 ? 'SVIP' : cust.level === 2 ? 'VIP' : '普通'}</span></dd>
+                  <dt>累计</dt><dd>${cust.totalOrders} 单 / ${Utils.formatMoney(cust.totalAmount)}</dd>
+                  <dt>偏好</dt><dd>${(cust.tags || []).map(t => `<span class="tag tag-soft">${t}</span>`).join(' ') || '<span class="td-muted">无</span>'}</dd>
+                </dl>` : ''}
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <span class="card-title">服务阿姨</span>
+                ${staff ? `<a class="btn btn-ghost btn-sm" href="staff-detail.html?id=${staff.id}">阿姨档案 →</a>` : ''}
+              </div>
+              <div class="card-body">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                  <span style="font-size:30px">${staff ? staff.avatar : '👩'}</span>
+                  <div>
+                    <div style="font-size:16px;font-weight:600">${order.staffName}</div>
+                    <div class="td-muted">${staff ? staff.phone + ' · ⭐ ' + staff.rating : ''}</div>
+                  </div>
+                </div>
+                ${staff ? `<div>${staff.skills.map(s => `<span class="tag tag-skill">${s}</span>`).join(' ')}</div>` : ''}
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">该阿姨当天其他排班</span></div>
+            <div class="card-body tight">
+              ${sameDay.length === 0
+                ? '<div class="table-empty" style="padding:30px">当天没有其他订单</div>'
+                : `<table class="data"><thead><tr><th>时间</th><th>客户</th><th>服务</th><th>金额</th><th>状态</th></tr></thead>
+                   <tbody>${sameDay.map(o => `<tr class="clickable" onclick="location.href='order-detail.html?id=${o.id}'">
+                     <td class="td-strong">${Utils.formatDate(o.startTime, 'HH:mm')}–${Utils.formatDate(o.endTime, 'HH:mm')}</td>
+                     <td>${o.customerName}</td><td>${o.serviceType}</td>
+                     <td class="td-money">${Utils.formatMoney(o.amount)}</td>
+                     <td><span class="tag tag-${Utils.getOrderStatusClass(o.status)}">${Utils.getOrderStatusName(o.status)}</span></td>
+                   </tr>`).join('')}</tbody></table>`}
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span class="card-title">订单进度</span></div>
+          <div class="card-body">
+            <div class="tl">
+              ${tl.map(x => `<div class="tl-item">
+                <div class="tl-dot" style="background:${x.color}"></div>
+                <div class="tl-time">${Utils.formatDate(x.t, 'MM-DD HH:mm')}</div>
+                <div class="tl-text">${x.text}</div>
+              </div>`).join('')}
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  window.setStatus = function (s) {
+    OrderStorage.update(id, { status: s });
+    Utils.toast('订单状态已更新');
+    render();
+  };
+
+  // ===== 取消弹窗 =====
+  window.openCancel = function () {
+    document.getElementById('modalHost').innerHTML = `
+      <div class="mask" onclick="if(event.target===this)closeModal()">
+        <div class="modal">
+          <div class="modal-head">
+            <span class="modal-title">取消订单</span>
+            <button class="modal-x" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-warn"><span>⚠️</span><div>取消后该阿姨的排班将被释放，可接其他订单。</div></div>
+            <div class="field">
+              <label class="field-label">取消原因 <span class="req">*</span></label>
+              <select class="select" id="cancelType">
+                <option>客户原因 - 临时有事</option>
+                <option>客户原因 - 改约其他时间</option>
+                <option>客户原因 - 不需要了</option>
+                <option>阿姨原因 - 身体不适</option>
+                <option>阿姨原因 - 时间冲突</option>
+                <option>公司原因 - 人员调配</option>
+                <option>其他</option>
+              </select>
+            </div>
+            <div class="field" style="margin-bottom:0">
+              <label class="field-label">补充说明</label>
+              <textarea class="textarea" id="cancelNote" placeholder="选填"></textarea>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeModal()">返回</button>
+            <button class="btn btn-danger" onclick="doCancel()">确认取消订单</button>
+          </div>
+        </div>
+      </div>`;
+  };
+
+  window.doCancel = function () {
+    const type = document.getElementById('cancelType').value;
+    const note = document.getElementById('cancelNote').value.trim();
+    OrderStorage.update(id, { status: 0, cancelReason: type + (note ? '：' + note : '') });
+    closeModal();
+    Utils.toast('订单已取消');
+    render();
+  };
+
+  // ===== 改期弹窗 =====
+  window.openReschedule = function () {
+    const o = OrderStorage.getById(id);
+    document.getElementById('modalHost').innerHTML = `
+      <div class="mask" onclick="if(event.target===this)closeModal()">
+        <div class="modal">
+          <div class="modal-head">
+            <span class="modal-title">订单改期</span>
+            <button class="modal-x" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-info"><span>ℹ️</span><div>
+              当前：${Utils.formatDate(o.startTime, 'YYYY-MM-DD HH:mm')} – ${Utils.formatDate(o.endTime, 'HH:mm')}<br>
+              保存前会自动检测 ${o.staffName} 的新时段是否冲突。</div></div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">新日期 <span class="req">*</span></label>
+                <input class="input" id="rsDate" type="date" value="${Utils.formatDate(o.startTime)}" onchange="rsCheck()">
+              </div>
+              <div class="field">
+                <label class="field-label">新开始时间 <span class="req">*</span></label>
+                <input class="input" id="rsTime" type="time" value="${Utils.formatDate(o.startTime, 'HH:mm')}" onchange="rsCheck()">
+              </div>
+            </div>
+            <div id="rsResult"></div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeModal()">返回</button>
+            <button class="btn btn-primary" onclick="doReschedule()">确认改期</button>
+          </div>
+        </div>
+      </div>`;
+    rsCheck();
+  };
+
+  function rsRange() {
+    const o = OrderStorage.getById(id);
+    const d = document.getElementById('rsDate').value;
+    const t = document.getElementById('rsTime').value;
+    if (!d || !t) return null;
+    const start = new Date(d + 'T' + t + ':00');
+    return { start: start.toISOString(), end: new Date(start.getTime() + o.duration * 3600000).toISOString() };
+  }
+
+  window.rsCheck = function () {
+    const r = rsRange();
+    const box = document.getElementById('rsResult');
+    if (!r) { box.innerHTML = ''; return false; }
+    const o = OrderStorage.getById(id);
+    const hits = OrderStorage.checkConflict(o.staffId, r.start, r.end, id);
+    if (hits.length) {
+      box.innerHTML = `<div class="alert alert-err"><span>⚠️</span><div><b>新时段冲突</b><br>
+        ${hits.map(h => `· ${Utils.formatDate(h.startTime, 'MM-DD HH:mm')}–${Utils.formatDate(h.endTime, 'HH:mm')} ${h.customerName}`).join('<br>')}</div></div>`;
+      return false;
+    }
+    box.innerHTML = `<div class="alert alert-ok"><span>✅</span><div>新时段：${Utils.formatDate(r.start, 'MM-DD HH:mm')}–${Utils.formatDate(r.end, 'HH:mm')}，无冲突。</div></div>`;
+    return true;
+  };
+
+  window.doReschedule = function () {
+    if (!rsCheck()) { Utils.toast('新时段存在冲突，请重新选择'); return; }
+    const r = rsRange();
+    OrderStorage.update(id, { startTime: r.start, endTime: r.end });
+    closeModal();
+    Utils.toast('改期成功，已通知客户和阿姨');
+    render();
+  };
+
+  window.closeModal = function () { document.getElementById('modalHost').innerHTML = ''; };
+}
+</script>
+</body>
+</html>

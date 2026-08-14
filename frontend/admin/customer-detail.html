@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>客户档案 - 家政排班管理后台</title>
+<link rel="stylesheet" href="styles/admin.css">
+<style>
+  .hero { display: flex; align-items: center; gap: 18px; padding: 22px; }
+  .hero-avatar {
+    width: 58px; height: 58px; border-radius: 15px; background: var(--primary-bg);
+    display: flex; align-items: center; justify-content: center; font-size: 27px;
+  }
+  .hero-name { font-size: 23px; font-weight: 700; }
+  .hero-meta { font-size: 13px; color: var(--text-tertiary); margin-top: 3px; }
+  .hero-spacer { flex: 1; }
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border-radius: 0 0 var(--radius-lg) var(--radius-lg); overflow: hidden; }
+  .stat-cell { background: #fff; padding: 15px 18px; }
+  .stat-val { font-size: 21px; font-weight: 700; }
+  .stat-key { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="main">
+  <header class="topbar">
+    <div>
+      <span class="topbar-title">客户档案</span>
+      <span class="topbar-sub" id="nameLabel"></span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" onclick="history.back()">‹ 返回</button>
+      <span id="topActions"></span>
+    </div>
+  </header>
+  <div class="page" id="page"></div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/layout.js"></script>
+<script>
+if (AdminLayout.init('customers')) {
+
+  const id = Utils.getParam('id');
+  const c = CustomerStorage.getById(id);
+
+  if (!c) {
+    document.getElementById('page').innerHTML =
+      '<div class="card"><div class="table-empty"><div class="table-empty-icon">🔍</div>客户不存在</div></div>';
+  } else {
+    document.getElementById('nameLabel').textContent = c.name;
+    document.getElementById('topActions').innerHTML =
+      `<button class="btn btn-primary" onclick="location.href='order-create.html?customerId=${c.id}'">+ 为她下单</button>`;
+
+    const orders = OrderStorage.getByCustomer(id).sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+    const done = orders.filter(o => o.status === 4);
+    const avg = done.length ? Math.round(done.reduce((a, o) => a + o.amount, 0) / done.length) : 0;
+    const days = c.lastServiceDate ? Utils.daysBetween(c.lastServiceDate, new Date().toISOString()) : null;
+    const need = days !== null && days > 30;
+    const lvName = c.level === 3 ? 'SVIP' : c.level === 2 ? 'VIP' : '普通';
+
+    // 常用阿姨
+    const staffCount = {};
+    done.forEach(o => { staffCount[o.staffName] = (staffCount[o.staffName] || 0) + 1; });
+    const favStaff = Object.entries(staffCount).sort((a, b) => b[1] - a[1]).slice(0, 4);
+
+    // 服务偏好统计
+    const typeCount = {};
+    done.forEach(o => { typeCount[o.serviceType] = (typeCount[o.serviceType] || 0) + 1; });
+    const favTypes = Object.entries(typeCount).sort((a, b) => b[1] - a[1]);
+
+    // 平均间隔
+    let avgGap = null;
+    if (done.length >= 2) {
+      const sorted = done.map(o => new Date(o.startTime)).sort((a, b) => a - b);
+      let sum = 0;
+      for (let i = 1; i < sorted.length; i++) sum += (sorted[i] - sorted[i - 1]) / 86400000;
+      avgGap = Math.round(sum / (sorted.length - 1));
+    }
+
+    document.getElementById('page').innerHTML = `
+      ${need ? `<div class="alert alert-warn"><span>🔔</span><div>
+        <b>复购提醒</b>：该客户已 ${days} 天未下单${avgGap ? `，历史平均 ${avgGap} 天服务一次` : ''}，建议主动联系。</div></div>` : ''}
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="hero">
+          <div class="hero-avatar">👤</div>
+          <div>
+            <div class="hero-name">${c.name}
+              <span class="tag ${c.level === 3 ? 'tag-svip' : c.level === 2 ? 'tag-vip' : 'tag-soft'}" style="font-size:12px;vertical-align:middle">${lvName}</span>
+            </div>
+            <div class="hero-meta">${c.phone} · 来源 ${c.source || '未知'}</div>
+            <div class="hero-meta">📍 ${c.address || '未填写地址'}</div>
+            ${(c.tags || []).length ? `<div style="margin-top:8px">${c.tags.map(t => `<span class="tag tag-soft">${t}</span>`).join(' ')}</div>` : ''}
+          </div>
+          <div class="hero-spacer"></div>
+          <div style="text-align:right">
+            <div style="font-size:27px;font-weight:700;color:var(--primary)">${Utils.formatMoney(c.totalAmount || 0)}</div>
+            <div class="hero-meta">累计消费</div>
+          </div>
+        </div>
+        <div class="stat-grid">
+          <div class="stat-cell"><div class="stat-val">${c.totalOrders || 0}</div><div class="stat-key">累计订单</div></div>
+          <div class="stat-cell"><div class="stat-val">${Utils.formatMoney(avg)}</div><div class="stat-key">平均客单价</div></div>
+          <div class="stat-cell"><div class="stat-val">${avgGap !== null ? avgGap + ' 天' : '-'}</div><div class="stat-key">平均服务间隔</div></div>
+          <div class="stat-cell"><div class="stat-val" style="${need ? 'color:var(--danger)' : ''}">${days !== null ? days + ' 天前' : '从未'}</div><div class="stat-key">上次服务</div></div>
+        </div>
+      </div>
+
+      <div class="grid-side">
+        <div class="card">
+          <div class="card-head"><span class="card-title">服务记录（${orders.length}）</span></div>
+          <div class="card-body tight">
+            ${orders.length === 0
+              ? '<div class="table-empty" style="padding:40px"><div class="table-empty-icon">📭</div>暂无服务记录</div>'
+              : `<table class="data"><thead><tr>
+                  <th style="width:112px">日期</th><th>服务类型</th><th>阿姨</th>
+                  <th style="width:70px">时长</th><th style="width:92px">金额</th><th style="width:82px">状态</th>
+                </tr></thead>
+                <tbody>${orders.map(o => `<tr class="clickable" onclick="location.href='order-detail.html?id=${o.id}'">
+                  <td>${Utils.formatDate(o.startTime, 'YYYY-MM-DD')}
+                    <div class="td-muted">${Utils.formatDate(o.startTime, 'HH:mm')}</div></td>
+                  <td>${o.serviceType}</td>
+                  <td>${o.staffName}</td>
+                  <td class="td-muted">${o.duration} h</td>
+                  <td class="td-money">${Utils.formatMoney(o.amount)}</td>
+                  <td><span class="tag tag-${Utils.getOrderStatusClass(o.status)}">${Utils.getOrderStatusName(o.status)}</span></td>
+                </tr>`).join('')}</tbody></table>`}
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card">
+            <div class="card-head"><span class="card-title">常用阿姨</span></div>
+            <div class="card-body">
+              ${favStaff.length === 0 ? '<div class="td-muted" style="text-align:center;padding:12px">暂无数据</div>'
+                : favStaff.map(([name, cnt], i) => `
+                  <div class="rank-row">
+                    <div class="rank-no ${i === 0 ? 'top1' : ''}">${i + 1}</div>
+                    <div style="flex:1;font-size:13.5px">${name}</div>
+                    <div class="td-muted">${cnt} 次</div>
+                  </div>`).join('')}
+              <div class="field-hint" style="margin-top:10px">派单时优先推荐合作过且评价好的阿姨</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">服务偏好</span></div>
+            <div class="card-body">
+              ${favTypes.length === 0 ? '<div class="td-muted" style="text-align:center;padding:12px">暂无数据</div>'
+                : `<div class="bars">${favTypes.map(([t, cnt]) => `
+                    <div class="bar-row">
+                      <div class="bar-label" style="width:72px">${t}</div>
+                      <div class="bar-track"><div class="bar-fill" style="width:${cnt / favTypes[0][1] * 100}%;background:var(--primary)"></div></div>
+                      <div class="bar-val" style="width:48px">${cnt} 次</div>
+                    </div>`).join('')}</div>`}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">备注</span></div>
+            <div class="card-body">
+              <div style="font-size:13.5px;line-height:1.7">${c.remark || '<span class="td-muted">暂无备注</span>'}</div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+}
+</script>
+</body>
+</html>

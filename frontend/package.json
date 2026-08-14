@@ -1,0 +1,9 @@
+{
+  "name": "housekeeping-frontend",
+  "version": "0.1.0",
+  "description": "家政排班与订单管理系统 - 前端",
+  "scripts": {
+    "serve": "npx serve . -p 5000",
+    "dev": "npx serve . -p 5000 --cors"
+  }
+}

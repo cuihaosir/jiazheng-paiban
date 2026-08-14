@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#059669">
+<title>我的工资 - 阿姨工作台</title>
+<link rel="stylesheet" href="styles/app.css">
+<style>
+  .m-bar {
+    display: flex; align-items: center; justify-content: center; gap: 22px;
+    padding: 12px; background: #fff; border-bottom: 1px solid var(--divider);
+  }
+  .m-arrow { background: none; border: none; font-size: 24px; line-height: 1; color: var(--text-secondary); cursor: pointer; padding: 0 10px; }
+  .m-label { font-size: 16px; font-weight: 600; min-width: 108px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="pay-hero">
+    <div style="display:flex;align-items:center;margin-bottom:8px">
+      <button style="background:none;border:none;color:#fff;font-size:27px;line-height:1;padding:0 10px 3px 0;cursor:pointer" onclick="location.href='home.html'">‹</button>
+      <span style="font-size:17px;font-weight:600">我的工资</span>
+    </div>
+    <div class="pay-month" id="payMonth"></div>
+    <div class="pay-amount" id="payAmount">¥0</div>
+    <div class="pay-note" id="payNote"></div>
+  </div>
+
+  <div class="float">
+    <div class="pay-grid" id="payGrid"></div>
+  </div>
+
+  <div class="m-bar">
+    <button class="m-arrow" onclick="shift(-1)">‹</button>
+    <span class="m-label" id="mLabel"></span>
+    <button class="m-arrow" onclick="shift(1)">›</button>
+  </div>
+
+  <div id="content"></div>
+</div>
+
+<script src="../shared/scripts/utils.js"></script>
+<script src="../shared/scripts/mock-data.js"></script>
+<script src="../shared/scripts/storage.js"></script>
+<script src="scripts/app.js"></script>
+<script>
+if (App.init('salary')) {
+
+  const me = App.me();
+  let month = Utils.getCurrentMonth();
+
+  window.shift = function (d) {
+    const [y, m] = month.split('-').map(Number);
+    const dt = new Date(y, m - 1 + d, 1);
+    const next = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+    if (next > Utils.getCurrentMonth()) { Utils.toast('还没到那个月呢'); return; }
+    month = next;
+    render();
+  };
+
+  function render() {
+    const label = month.replace('-', ' 年 ') + ' 月';
+    document.getElementById('payMonth').textContent = label;
+    document.getElementById('mLabel').textContent = label;
+
+    let rec = SalaryStorage.getByStaff(me.id, month);
+    if (!rec) rec = SalaryStorage.calculateSalary(me.id, month);
+
+    const [y, m] = month.split('-').map(Number);
+    const start = new Date(y, m - 1, 1), end = new Date(y, m, 1);
+    const jobs = App.myOrders().filter(o =>
+      o.status === 4 && new Date(o.startTime) >= start && new Date(o.startTime) < end
+    ).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+    const isCurrent = month === Utils.getCurrentMonth();
+
+    if (!rec || rec.orderCount === 0) {
+      document.getElementById('payAmount').textContent = '¥0';
+      document.getElementById('payNote').textContent = isCurrent ? '本月还没有完成的订单' : '这个月没有完成订单';
+      document.getElementById('payGrid').innerHTML = `
+        <div class="pay-grid-cell"><div class="pay-grid-v">0</div><div class="pay-grid-k">完成订单</div></div>
+        <div class="pay-grid-cell"><div class="pay-grid-v">0 h</div><div class="pay-grid-k">服务时长</div></div>
+        <div class="pay-grid-cell"><div class="pay-grid-v">-</div><div class="pay-grid-k">状态</div></div>`;
+      document.getElementById('content').innerHTML =
+        '<div class="empty"><div class="empty-icon">📝</div><div class="empty-text">' +
+        (isCurrent ? '完成订单后<br>工资会自动算好显示在这里' : '这个月没有工资记录') + '</div></div>';
+      return;
+    }
+
+    const stName = rec.status === 1 ? '待确认' : rec.status === 2 ? '已确认' : '已发放';
+    document.getElementById('payAmount').textContent = Utils.formatMoney(rec.shouldPay);
+    document.getElementById('payNote').textContent = isCurrent ? '本月预估，随完成订单实时更新' : stName;
+
+    document.getElementById('payGrid').innerHTML = `
+      <div class="pay-grid-cell"><div class="pay-grid-v">${rec.orderCount}</div><div class="pay-grid-k">完成订单</div></div>
+      <div class="pay-grid-cell"><div class="pay-grid-v">${rec.totalHours} h</div><div class="pay-grid-k">服务时长</div></div>
+      <div class="pay-grid-cell"><div class="pay-grid-v" style="font-size:16px">${stName}</div><div class="pay-grid-k">状态</div></div>`;
+
+    document.getElementById('content').innerHTML = `
+      <div class="card">
+        <div class="card-head"><span class="card-title">工资怎么算的</span></div>
+        <div class="card-body">
+          <div class="pay-item">
+            <span class="pay-item-k">基本工资</span>
+            <span class="pay-item-v plus">+${Utils.formatMoney(rec.baseSalary)}</span>
+          </div>
+          ${rec.commission > 0 ? `<div class="pay-item">
+            <span class="pay-item-k">提成</span>
+            <span class="pay-item-v plus">+${Utils.formatMoney(rec.commission)}</span></div>` : ''}
+          ${rec.bonus > 0 ? `<div class="pay-item">
+            <span class="pay-item-k">全勤奖<span style="font-size:12.5px;color:var(--text-tertiary)">（满 20 单）</span></span>
+            <span class="pay-item-v plus">+${Utils.formatMoney(rec.bonus)}</span></div>` : ''}
+          ${rec.subsidy > 0 ? `<div class="pay-item">
+            <span class="pay-item-k">交通补贴<span style="font-size:12.5px;color:var(--text-tertiary)">（满 80 小时）</span></span>
+            <span class="pay-item-v plus">+${Utils.formatMoney(rec.subsidy)}</span></div>` : ''}
+          ${rec.deduction > 0 ? `<div class="pay-item">
+            <span class="pay-item-k">扣款</span>
+            <span class="pay-item-v minus">-${Utils.formatMoney(rec.deduction)}</span></div>` : ''}
+          <div class="pay-item total">
+            <span class="pay-item-k">应发合计</span>
+            <span class="pay-item-v">${Utils.formatMoney(rec.shouldPay)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span class="card-title">每一单明细（${jobs.length} 单）</span></div>
+        <div class="card-body">
+          ${jobs.map(o => `
+            <div class="pay-log" onclick="location.href='order-detail.html?id=${o.id}'">
+              <div>
+                <div style="font-weight:500">${o.serviceType} · ${o.duration} 小时</div>
+                <div class="pay-log-date">${Utils.formatDate(o.startTime, 'MM月DD日')} · ${o.customerName}</div>
+              </div>
+              <span style="font-weight:600;color:var(--brand)">${Utils.formatMoney(o.amount)}</span>
+            </div>`).join('')}
+        </div>
+      </div>
+
+      <div class="notice notice-info">
+        <span>💡</span>
+        <div>工资有疑问？可以对着这里的每一单核对，如有问题请联系调度员或老板。</div>
+      </div>`;
+  }
+
+  render();
+}
+</script>
+</body>
+</html>
